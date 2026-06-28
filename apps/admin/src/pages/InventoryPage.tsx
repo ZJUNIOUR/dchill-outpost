@@ -4,7 +4,9 @@ import { PERMISSION } from '@dchill/shared';
 import type { Category, InventoryRecordWithProduct, ProductWithCategory } from '@dchill/types';
 
 import { usePermissions } from '../auth/usePermissions.js';
+import { CategoryManager } from '../components/inventory/CategoryManager.js';
 import { InventoryQuantityForm } from '../components/inventory/InventoryQuantityForm.js';
+import { ProductBarcodeManager } from '../components/inventory/ProductBarcodeManager.js';
 import { ProductForm } from '../components/inventory/ProductForm.js';
 import { ProductTable } from '../components/inventory/ProductTable.js';
 import {
@@ -32,6 +34,7 @@ export function InventoryPage(): JSX.Element {
   const canWriteProducts = has(PERMISSION.PRODUCTS_WRITE);
   const canReadInventory = has(PERMISSION.INVENTORY_READ);
   const canWriteInventory = has(PERMISSION.INVENTORY_WRITE);
+  const canManageBarcodes = has(PERMISSION.BARCODES_MANAGE);
 
   const [products, setProducts] = useState<ProductWithCategory[]>([]);
   const [inventory, setInventory] = useState<InventoryRecordWithProduct[]>([]);
@@ -42,6 +45,7 @@ export function InventoryPage(): JSX.Element {
   const [formMode, setFormMode] = useState<FormMode>('closed');
   const [editingProduct, setEditingProduct] = useState<ProductWithCategory | null>(null);
   const [inventoryTarget, setInventoryTarget] = useState<ProductWithCategory | null>(null);
+  const [barcodeProductId, setBarcodeProductId] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const inventoryByProductId = useMemo(() => {
@@ -169,8 +173,8 @@ export function InventoryPage(): JSX.Element {
         <div>
           <h1 style={styles.h1}>Inventory</h1>
           <p style={styles.note}>
-            Phase 2A foundation. UI permission hints below are not security — RLS in Postgres
-            enforces every read and write.
+            Phase 2A–2B. UI permission hints below are not security — RLS in Postgres enforces
+            every read and write.
           </p>
         </div>
         <Link to="/dashboard" style={styles.link}>
@@ -186,6 +190,15 @@ export function InventoryPage(): JSX.Element {
         <p>Loading…</p>
       ) : (
         <>
+          <section style={styles.section}>
+            <CategoryManager
+              categories={categories}
+              canRead={canReadProducts}
+              canWrite={canWriteProducts}
+              onChanged={loadData}
+            />
+          </section>
+
           <section style={styles.section}>
             <div style={styles.sectionHeader}>
               <h2>Products</h2>
@@ -340,6 +353,16 @@ export function InventoryPage(): JSX.Element {
                 )}
               </>
             )}
+          </section>
+
+          <section style={styles.section}>
+            <ProductBarcodeManager
+              products={products}
+              canReadProducts={canReadProducts}
+              canManageBarcodes={canManageBarcodes}
+              selectedProductId={barcodeProductId}
+              onSelectProduct={setBarcodeProductId}
+            />
           </section>
         </>
       )}

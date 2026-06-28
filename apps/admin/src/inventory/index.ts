@@ -4,6 +4,7 @@ import type {
   InventoryRecord,
   InventoryRecordWithProduct,
   Product,
+  ProductBarcode,
   ProductStatus,
   ProductWithCategory,
 } from '@dchill/types';
@@ -88,6 +89,23 @@ function mapInventory(row: Record<string, unknown>): InventoryRecord {
     last_synced_at: row.last_synced_at ? String(row.last_synced_at) : null,
     updated_at: String(row.updated_at),
   };
+}
+
+function mapProductBarcode(row: Record<string, unknown>): ProductBarcode {
+  return {
+    id: String(row.id),
+    product_id: String(row.product_id),
+    barcode: String(row.barcode),
+    is_primary: Boolean(row.is_primary),
+  };
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 function mapProductWithCategory(row: Record<string, unknown>): ProductWithCategory | null {
@@ -347,3 +365,171 @@ export async function updateInventoryQuantity(
 
   return { data: mapInventory(data as Record<string, unknown>), error: null };
 }
+
+export interface CreateCategoryInput {
+  name: string;
+  slug: string;
+  parent_id?: string | null;
+  sort_order?: number;
+  is_active?: boolean;
+}
+
+export interface UpdateCategoryInput {
+  name?: string;
+  slug?: string;
+  parent_id?: string | null;
+  sort_order?: number;
+  is_active?: boolean;
+}
+
+/** Creates a category. Requires `products.write` (enforced by RLS on categories). */
+export async function createCategory(input: CreateCategoryInput): Promise<AuthResult<Category>> {
+  const { data, error } = await supabase
+    .from('categories')
+    .insert({
+      name: input.name,
+      slug: input.slug,
+      parent_id: input.parent_id ?? null,
+      sort_order: input.sort_order ?? 0,
+      is_active: input.is_active ?? true,
+    })
+    .select('id, name, slug, parent_id, sort_order, is_active')
+    .single();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return { data: mapCategory(data as Record<string, unknown>), error: null };
+}
+
+/** Updates category fields. Requires `products.write` (enforced by RLS). */
+export async function updateCategory(
+  categoryId: string,
+  input: UpdateCategoryInput,
+): Promise<AuthResult<Category>> {
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.slug !== undefined) patch.slug = input.slug;
+  if (input.parent_id !== undefined) patch.parent_id = input.parent_id;
+  if (input.sort_order !== undefined) patch.sort_order = input.sort_order;
+  if (input.is_active !== undefined) patch.is_active = input.is_active;
+
+  const { data, error } = await supabase
+    .from('categories')
+    .update(patch)
+    .eq('id', categoryId)
+    .select('id, name, slug, parent_id, sort_order, is_active')
+    .single();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return { data: mapCategory(data as Record<string, unknown>), error: null };
+}
+
+/** Toggles `is_active` on a category. Requires `products.write` (enforced by RLS). */
+export async function setCategoryActive(
+  categoryId: string,
+  active: boolean,
+): Promise<AuthResult<Category>> {
+  return updateCategory(categoryId, { is_active: active });
+}
+
+/** Lists barcodes for one product. RLS enforces read access. */
+export async function listProductBarcodes(productId: string): Promise<AuthResult<ProductBarcode[]>> {
+  const { data, error } = await supabase
+    .from('product_barcodes')
+    .select('id, product_id, barcode, is_primary')
+    .eq('product_id', productId)
+    .order('is_primary', { ascending: false })
+    .order('barcode', { ascending: true });
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return {
+    data: (data ?? []).map((row) => mapProductBarcode(row as Record<string, unknown>)),
+    error: null,
+  };
+}
+
+/**
+ * Adds a barcode to a product. Schema has no `barcode_type` column — only `barcode` and `is_primary`.
+ * Requires `barcodes.manage` (enforced by RLS).
+ */
+export async function addProductBarcode(
+  productId: string,
+  barcode: string,
+  isPrimary = false,
+): Promise<AuthResult<ProductBarcode>> {
+  const trimmed = barcode.trim();
+  if (!trimmed) {
+    return { data: null, error: 'Barcode is required.' };
+  }
+
+  const { data, error } = await supabase
+    .from('product_barcodes')
+    .insert({
+      product_id: productId,
+      barcode: trimmed,
+      is_primary: isPrimary,
+    })
+    .select('id, product_id, barcode, is_primary')
+    .single();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return { data: mapProductBarcode(data as Record<string, unknown>), error: null };
+}
+
+export interface UpdateProductBarcodeInput {
+  barcode?: string;
+  is_primary?: boolean;
+}
+
+/** Updates barcode value and/or primary flag. Requires `barcodes.manage` (enforced by RLS). */
+export async function updateProductBarcode(
+  barcodeId: string,
+  input: UpdateProductBarcodeInput,
+): Promise<AuthResult<ProductBarcode>> {
+  const patch: Record<string, unknown> = {};
+  if (input.barcode !== undefined) {
+    const trimmed = input.barcode.trim();
+    if (!trimmed) {
+      return { data: null, error: 'Barcode cannot be empty.' };
+    }
+    patch.barcode = trimmed;
+  }
+  if (input.is_primary !== undefined) patch.is_primary = input.is_primary;
+
+  const { data, error } = await supabase
+    .from('product_barcodes')
+    .update(patch)
+    .eq('id', barcodeId)
+    .select('id, product_id, barcode, is_primary')
+    .single();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return { data: mapProductBarcode(data as Record<string, unknown>), error: null };
+}
+
+/** Deletes a barcode row. Requires `barcodes.manage` (enforced by RLS). */
+export async function deleteProductBarcode(barcodeId: string): Promise<AuthResult<null>> {
+  const { error } = await supabase.from('product_barcodes').delete().eq('id', barcodeId);
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return { data: null, error: null };
+}
+
+export { slugify };

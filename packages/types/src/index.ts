@@ -141,6 +141,11 @@ export interface ProductBarcode {
   is_primary: boolean;
 }
 
+/** Product with nested barcode rows (admin joins). */
+export interface ProductWithBarcodes extends ProductWithCategory {
+  barcodes: ProductBarcode[];
+}
+
 /** Row shape from `public.inventory`. */
 export interface InventoryRecord {
   product_id: string;

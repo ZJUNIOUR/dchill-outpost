@@ -8,32 +8,41 @@ Operational dashboard: products, inventory, pricing, barcodes, pickup orders, cu
 
 ## Phase 2A — Inventory foundation
 
-First operational area: product list, basic create/edit, and raw inventory quantity updates.
+Product list, basic create/edit, and raw inventory quantity updates.
+
+## Phase 2B — Categories & barcodes
+
+Extends the inventory page with category management and manual product barcode CRUD (no camera scanner).
 
 **Key files:**
 
 - `src/inventory/index.ts` — Supabase data helpers (anon client only)
 - `src/pages/InventoryPage.tsx` — inventory UI
-- `src/components/inventory/*` — product table, forms
+- `src/components/inventory/CategoryManager.tsx` — category list + create/edit/active
+- `src/components/inventory/ProductBarcodeManager.tsx` — barcode list/add/edit/delete per product
 - `src/auth/usePermissions.ts` — permission hints for UI gating
 
 **What it does:**
 
-- List products (name, SKU, category, price, active visibility, stock status)
-- Create and edit products through helper functions
-- Toggle customer visibility (`hidden` vs visible statuses)
-- List and update on-hand inventory counts (staff-only raw counts)
+- **Products:** list, create/edit, toggle visibility (`hidden` vs visible statuses)
+- **Categories:** list, create/edit, activate/deactivate (`is_active`)
+- **Barcodes:** list per product, add/edit/delete rows in `product_barcodes` (`barcode`, `is_primary`)
+- **Inventory:** list and update on-hand counts (staff-only raw counts)
 
-**What it does not do yet:** barcodes, images, Clover sync, orders, notifications, reports.
+**Schema note:** `product_barcodes` has no `barcode_type` column — only `barcode` (unique) and `is_primary`.
+
+**What it does not do yet:** camera/scanner UI, customer catalog, images, Clover sync, orders, notifications, reports.
 
 ### Required permissions (UI hints)
 
 | Action | Permission key | Notes |
 |--------|----------------|-------|
-| View products | `products.read` | Hides product UI if missing |
+| View products / categories | `products.read` | Hides catalog UI if missing |
 | Create/edit products | `products.write` | RLS also requires this (or `prices.write` for some price edits) |
+| Create/edit categories | `products.write` | RLS `categories_write` policy uses `products.write` |
 | View raw inventory counts | `inventory.read` | Customers never see these in the mobile app |
 | Update quantities | `inventory.write` | Upserts `public.inventory` rows |
+| Add/edit/delete barcodes | `barcodes.manage` | RLS `barcodes_write` policy |
 
 **RLS is authoritative.** Permission checks in the UI are convenience only — Postgres policies enforce every query and mutation. If RLS denies an action, the UI shows the database error (including explicit RLS denial messages).
 
