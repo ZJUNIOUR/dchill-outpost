@@ -16,6 +16,14 @@ import type { PostgrestError } from '@supabase/supabase-js';
 import { getCurrentUser } from '../auth/index.js';
 import { supabase } from '../lib/supabase.js';
 
+/**
+ * Admin inventory helpers — anon Supabase client only (RLS enforced).
+ *
+ * WRITE helpers in this module are temporary local-dev/admin foundation (Phase 2A–2C).
+ * Production catalog/stock mutations must go through Clover Edge Functions
+ * (Clover first, then Supabase mirror) — see docs/MEMORY.md §6a.
+ */
+
 const PRODUCT_STATUSES: ReadonlySet<string> = new Set([
   'in_stock',
   'low_stock',

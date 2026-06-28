@@ -33,13 +33,15 @@ Detailed technical architecture for DChill Outpost. Pickup-only MVP. Owner-prote
         ┌──────────────────────┼───────────────────────────┐
         ▼                      ▼                            ▼
    Edge Functions        pg_cron jobs                 External services
-   • create checkout     • generate pickup slots      • Clover (payments;
-   • send notifications  • low-stock sweep              optional catalog source)
+   • create checkout     • generate pickup slots      • Clover (payments +
+   • send notifications  • low-stock sweep              catalog/stock truth)
    • clover webhook      • notification retries       • Twilio (SMS)
-   • clover sync/refresh • clover token refresh       • Resend/SendGrid (email)
+   • clover sync/*       • clover token refresh       • Resend/SendGrid (email)
    • owner-checked
      credential change
 ```
+
+Clients read catalog/inventory from the **Supabase mirror** (RLS-protected). They never call Clover. Admin catalog/stock mutations eventually route: **admin UI → Edge Function → Clover API → Supabase mirror/logs**.
 
 ## 3. Frontend / mobile architecture
 
@@ -57,19 +59,36 @@ Detailed technical architecture for DChill Outpost. Pickup-only MVP. Owner-prote
 ## 5. Backend / API architecture
 
 - Primary data access is Supabase's auto-generated, RLS-protected API (PostgREST) directly from the clients.
-- **Edge Functions** handle anything that needs server authority or secrets:
+- **Edge Functions** handle anything that needs server authority, Clover API access, or secrets:
   - `clover-create-checkout` — recomputes the order total server-side, creates a Clover Hosted Checkout session, returns the hosted URL (never a key).
   - `clover-payment-webhook` — idempotent on `clover_payment_id`; marks paid, advances the order to `pending`, fires confirmation.
-  - `clover-sync-catalog` / `clover-sync-webhook` / `clover-token-refresh` — (if catalog sync is on) one-way Clover→Supabase item/stock sync and OAuth token refresh; service-role only.
+  - **Clover inventory (server-only; see §6):**
+    - `clover-token-refresh` — refresh OAuth tokens into `clover_credentials`.
+    - `clover-sync-catalog` — Clover→Supabase: items, categories, prices, barcodes.
+    - `clover-sync-inventory` — Clover→Supabase: stock reconciliation / delta poll.
+    - `clover-sync-webhook` — Clover item/stock webhooks → mirror upsert.
+    - `clover-create-or-update-item` — admin product/category writes: **Clover first**, then mirror.
+    - `clover-update-stock` — admin stock adjust: **Clover first**, then mirror + `inventory_logs`.
   - `send-notification` — sends SMS/email, logs the attempt, records failures.
   - `owner-checked-credential-change` — the only path to change login credentials; re-derives caller role from the DB and enforces Owner protection before using the service role.
 - Scheduled work runs via `pg_cron`: nightly pickup-slot generation (respecting prep time + slot caps), low-stock sweep, notification retry.
 
 ## 6. Database architecture
 
-- Postgres is the single source of truth. Core tables: `users` (profile + role), `roles`/`permissions`/`role_permissions` (capability catalog), `categories`, `products`, `product_barcodes`, `inventory`, `inventory_logs`, `favorites`, `carts`/`cart_items`, `pickup_orders`/`pickup_order_items`, `pickup_time_slots`, `order_windows`, `pickup_settings`/`system_settings`, `payments`, `notifications`, `audit_logs`. (Full DDL in `DATABASE_SCHEMA.sql`.)
+**Split source of truth (see `MEMORY.md` §6a):**
+
+| Domain | Authority | Notes |
+|---|---|---|
+| Products, categories, prices, barcodes, stock | **Clover** | POS/inventory system of record |
+| App mirror of catalog/stock | **Supabase** (`products`, `categories`, `product_barcodes`, `inventory`) | Synced from Clover; `clover_item_id`, `clover_sync_status`, `last_synced_at` |
+| Users, roles, permissions | **Supabase** | RLS + `users.role` enum |
+| Carts, orders, payments, notifications | **Supabase** | App workflow; prices/stock read from mirror at checkout |
+| App-only product metadata | **Supabase** | e.g. `is_featured`, `substitution_allowed`, favorites |
+
+Postgres is **not** the POS inventory authority. It is the **app data layer**: RLS-protected mirror, search index, and system of record for orders/users/notifications. Core tables: `users`, `roles`/`permissions`/`role_permissions`, `categories`, `products`, `product_barcodes`, `inventory`, `inventory_logs`, `favorites`, `carts`/`cart_items`, `pickup_orders`/`pickup_order_items`, `pickup_time_slots`, `order_windows`, `pickup_settings`/`system_settings`, `payments`, `notifications`, `audit_logs`, `clover_credentials`. (Full DDL in `DATABASE_SCHEMA.sql`.)
+
 - UUID PKs, `timestamptz` audit columns, price snapshots on order items, numeric money, and indexes on hot lookups (barcode, order status, product search).
-- **Inventory integrity:** `quantity_reserved` bumped at checkout; `quantity_on_hand` decremented inside a transaction when an admin accepts; both restored on cancel; every change written to `inventory_logs`.
+- **Inventory integrity:** `quantity_reserved` bumped at checkout against the **mirror**; `quantity_on_hand` decremented on admin accept (eventually via Clover write-through + mirror sync); restored on cancel; every change written to `inventory_logs`. Production stock changes must update **Clover first**, then the mirror.
 
 ## 7. Auth system
 
@@ -91,7 +110,7 @@ Detailed technical architecture for DChill Outpost. Pickup-only MVP. Owner-prote
 ## 10. Barcode scanner flow
 
 1. Camera opens (`CameraView`), scans a UPC/EAN.
-2. App queries `product_barcodes` by `barcode` (indexed, instant).
+2. App queries `product_barcodes` in the **Supabase mirror** by `barcode` (indexed, instant).
 3. Hit → product detail (price/stock/size) → add to cart if available. Miss → "product not found."
 4. Admin variants additionally: create product from barcode, adjust stock, update price, verify order items, with duplicate-barcode warnings and manual entry.
 
@@ -106,10 +125,12 @@ Each transition writes `audit_logs` / order status history and fires the appropr
 
 ## 12. Inventory update flow
 
-- **Checkout:** reserve quantities (`quantity_reserved += qty`) — guards against overselling the last unit.
-- **Accept:** in one transaction, `quantity_on_hand -= qty`, release the reservation, log the change, flip status to low/out as thresholds dictate.
+- **Clover-primary:** catalog/stock truth is in Clover. Supabase holds the mirror for app queries and RLS.
+- **Sync (read path):** `clover-sync-catalog`, `clover-sync-inventory`, and `clover-sync-webhook` keep the mirror current. Customer and admin **read** from Supabase only.
+- **Admin manual adjust (write path, production):** admin UI → `clover-update-stock` (or `clover-create-or-update-item` for catalog) → Clover API → upsert mirror + `inventory_logs`. Direct client writes to `inventory`/`products` are **local-dev placeholder only** (Phase 2A–2C).
+- **Checkout:** reserve quantities (`quantity_reserved += qty`) against the mirror — guards against overselling the last unit.
+- **Accept:** decrement stock (Clover + mirror in production), release reservation, log, flip status to low/out as thresholds dictate.
 - **Cancel:** restore on-hand and/or reservation, log it.
-- **Manual:** admins can adjust with a reason; logged. Barcode scan can drive restock/recount.
 
 ## 13. Security model
 

@@ -45,7 +45,7 @@ UI gating alone.
 - **Description:** Browse meats, drinks, seasonings, snacks, frozen, produce, household, Caribbean goods.
 - **User story:** As a shopper, I want to browse categories to find items.
 - **Acceptance criteria:** Categories list; tapping shows in-stock-aware products; hidden/admin-only items never shown to customers.
-- **Notes:** Caribbean specialty items are first-class in naming/categories.
+- **Notes:** Caribbean specialty items are first-class in naming/categories. **Reads from the Supabase mirror only** — mirror must be synced from Clover (Phase 2F) before customer catalog launch. Clients never call Clover.
 
 ### 2.2 Search (P0)
 - **Description:** Search by name, brand, category, barcode, keyword.
@@ -241,10 +241,17 @@ UI gating alone.
 - **User story:** As the business, I want Clover payments that are secure and reconcilable.
 - **Acceptance criteria:** `clover-create-checkout` recomputes totals server-side; `clover-payment-webhook` is idempotent on `clover_payment_id`; missed webhooks recovered by a reconciliation poll; `payments` rows link to the order via `clover_checkout_session_id`/`clover_payment_id`.
 
-### 10.5 Clover catalog/inventory sync (P1 — optional, one-way)
-- **Description:** If the store manages products in Clover, mirror items/SKUs/barcodes/prices/stock **one-way** Clover→Supabase.
-- **User story:** As an admin, I want the app catalog to match what we keep in Clover.
-- **Acceptance criteria:** Initial import + webhook + scheduled delta poll upsert by `clover_item_id`; Clover wins catalog fields, Supabase owns app-only fields (featured, favorites, pickup availability); drift flagged via `clover_sync_status`; no stock write-back at MVP. Set `clover_sync_mode='payments_only'` to disable when products aren't in Clover.
+### 10.5 Clover catalog/inventory sync & write-through (P0 — required before customer catalog)
+- **Description:** Clover is primary for products, categories, prices, barcodes, and stock. Supabase mirrors Clover for app browsing, search, RLS, and customer flows. **Read-only sync** (Clover→Supabase) must be proven before Phase 3 customer catalog. **Admin writes** must become Clover write-through (Edge Functions update Clover first, then sync mirror + logs) before production.
+- **User story:** As an admin, I want the app catalog and stock to match Clover — the store's POS truth — without exposing Clover credentials to clients.
+- **Acceptance criteria:**
+  - `clover-token-refresh`, `clover-sync-catalog`, `clover-sync-inventory`, and `clover-sync-webhook` keep the mirror current; upsert by `clover_item_id` (and future category/barcode mapping fields).
+  - Clover wins catalog/stock/price fields; Supabase owns app-only fields (`is_featured`, favorites, pickup availability, etc.).
+  - Drift flagged via `clover_sync_status`; conflicts visible in admin.
+  - `clover-create-or-update-item` and `clover-update-stock` are the **production** admin write paths (Clover first, then mirror).
+  - Customer catalog (Phase 3) reads **only** from the synced Supabase mirror — never unsynced `local_only` inventory as production truth.
+  - No client app calls Clover directly; no Clover secret in any bundle.
+- **Notes:** Phase 2A–2C direct Supabase writes are temporary local-dev/admin foundation. See `MEMORY.md` §6a and `docs/BUILD_ORDER.md` Phases 2D–2G.
 
 ---
 

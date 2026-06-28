@@ -40,25 +40,61 @@ Phases are dependency-ordered — each leans on the one before it.
   Building features before the walls means retrofitting security — the most
   common way owner-protection holes get introduced.
 
-## Phase 2 — Admin inventory system
-**Goal:** staff can stock the store.
-- Admin dashboard shell with role-aware navigation (reads `role_permissions`).
-- Product/category CRUD, image upload to Storage, pricing/sale price.
-- Inventory levels, low-stock thresholds, inventory logs, manual adjustments.
-- Barcode records (multi-barcode per product) + admin barcode tools.
-- **If products live in Clover (optional):** build the one-way **Clover→Supabase**
-  catalog sync (`clover-sync-catalog` + `clover-sync-webhook` + `clover-token-refresh`),
-  mapping items/SKUs/barcodes/prices/stock onto the Clover ID columns; set
-  `system_settings.clover_sync_mode`. Server-side only; tokens in `clover_credentials`.
-- **Depends on:** Phase 1. **Unblocks:** customer browsing (needs real catalog)
-  and order fulfillment (needs inventory truth).
+## Phase 2 — Admin inventory system (Clover-primary)
+
+**Architecture (locked — `MEMORY.md` §6a):** Clover is the source of truth for
+products, categories, prices, barcodes, and stock. Supabase is the synced
+mirror, RLS layer, and app data store. Client apps never call Clover directly.
+
+### Phase 2A–2C — Temporary Supabase-local admin foundation *(done / in progress)*
+**Goal:** admin UI shell + direct Supabase helpers for local development.
+- Admin dashboard shell with role-aware navigation.
+- Product/category CRUD, inventory counts, inventory logs, barcode CRUD via
+  **direct anon-client PostgREST writes** (temporary — not production truth).
+- **Depends on:** Phase 1.
+
+### Phase 2D — Clover-primary documentation alignment
+**Goal:** docs consistently state Clover-primary inventory (`MEMORY.md`, architecture,
+requirements, build order, admin README).
+- **Depends on:** Phase 2A–2C foundation.
+- **Unblocks:** Clover integration phases.
+
+### Phase 2E — Clover schema / mapping migration plan
+**Goal:** forward-only migrations for missing Clover mapping fields (e.g.
+`categories.clover_category_id`, barcode mapping, log external refs) and
+`clover_sync_mode` semantics — **plan and migrate; do not weaken RLS.**
+- **Depends on:** Phase 2D.
+- **Unblocks:** sync and write-through Edge Functions.
+
+### Phase 2F — Clover read-only sync
+**Goal:** prove Clover→Supabase mirror before any customer catalog work.
+- `clover-token-refresh`, `clover-sync-catalog`, `clover-sync-inventory`,
+  `clover-sync-webhook`; map items/SKUs/barcodes/prices/stock onto Clover ID
+  columns; set `system_settings.clover_sync_mode`. Server-side only; tokens in
+  `clover_credentials`.
+- Admin UI shows sync status (`clover_sync_status`, `last_synced_at`).
+- **Depends on:** Phases 1, 2E.
+- **Unblocks:** Phase 3 (customer catalog) and Phase 2G.
+
+### Phase 2G — Clover write-through admin inventory
+**Goal:** production admin writes go Clover-first, then mirror.
+- `clover-create-or-update-item`, `clover-update-stock`; wire admin UI helpers
+  to Edge Functions; atomic mirror+log via RPC where needed.
+- Disable or warn on direct Supabase catalog/stock writes outside local-dev mode.
+- Image upload to Storage, low-stock thresholds (app metadata on mirror).
+- **Depends on:** Phase 2F.
+- **Unblocks:** customer browsing and order fulfillment on real inventory.
+
+> **Do not launch Phase 3 customer catalog against unsynced `local_only`
+> inventory.** Customers must read from a proven Clover-synced Supabase mirror.
 
 ## Phase 3 — Customer product browsing
 **Goal:** customers can find products in the mobile app.
 - Expo app shell, auth screens, profile + saved (account-use) addresses.
 - Category browse, search (name/brand/category/barcode/keyword), filters,
   product detail with stock status, favorites, featured/Caribbean surfaces.
-- **Depends on:** Phases 1–2. **Unblocks:** scanning and ordering.
+- **All catalog reads from Supabase mirror** (synced from Clover in Phase 2F).
+- **Depends on:** Phases 1–2 (**Phase 2F sync proven**). **Unblocks:** scanning and ordering.
 
 ## Phase 4 — Barcode scanner
 **Goal:** scan a product and act on it.
@@ -66,7 +102,7 @@ Phases are dependency-ordered — each leans on the one before it.
   product detail → add-to-cart → "not found" path; manual entry fallback.
 - Admin scanner: lookup, add-product-by-barcode, restock, reprice,
   duplicate-warning, confirm-item-during-prep.
-- **Depends on:** Phases 2–3 (needs catalog + barcode records).
+- **Depends on:** Phases 2–3 (needs synced catalog + barcode records).
 - **Why here:** it's an accelerator on top of browse/inventory, not a
   prerequisite for them.
 
@@ -81,7 +117,7 @@ Phases are dependency-ordered — each leans on the one before it.
   `clover_payment_id`) confirms → order `pending`. All Clover credentials server-only.
   Keep pay-at-pickup as a separate, configurable mode (`payment_model`).
 - Inventory transaction: reserve on checkout, **decrement on admin accept**,
-  restore on cancel; every change logged.
+  restore on cancel; every change logged (Clover write-through in production).
 - Admin order queue (realtime): accept/reject, status updates, edit items /
   mark unavailable / substitute, contact customer, ready, complete, cancel.
 - Nightly `pg_cron` slot generation honoring order windows + prep time + caps.
@@ -106,8 +142,9 @@ Phases are dependency-ordered — each leans on the one before it.
   real origins; Sentry on all surfaces; backup/restore drill; audit-log review.
 - **Clover payment testing** (sandbox → production): success/failure/incomplete
   redirects, webhook idempotency on `clover_payment_id`, and the reconciliation
-  poll for missed webhooks. **Inventory sync testing** (if catalog sync is on):
-  item/SKU/barcode/price/stock mapping and `clover_sync_status` conflict flags.
+  poll for missed webhooks. **Clover inventory testing:** item/SKU/barcode/price/stock
+  mapping, write-through admin adjusts, `clover_sync_status` conflict flags, and
+  mirror freshness before catalog launch.
   Confirm no Clover secret is reachable by any client or by a Technology Specialist.
 - Load-check slot booking and inventory decrement under concurrency.
 - **Depends on:** Phases 1–6.
@@ -118,7 +155,8 @@ Phases are dependency-ordered — each leans on the one before it.
 - Deploy admin web (Vercel/Netlify); deploy Edge Functions; production env/secrets.
 - **Swap Clover sandbox credentials for production** (OAuth/merchant + Ecommerce
   tokens) in Edge Function secrets / `clover_credentials`; verify a live test charge.
-- Seed real catalog/inventory; staff training; launch readiness checklist signed.
+- Initial catalog/inventory via Clover sync (not ad-hoc local-only Supabase seed);
+  staff training; launch readiness checklist signed.
 - Flip SMS on once 10DLC is approved. Document runbooks + the Owner bootstrap.
 - **Depends on:** Phase 7.
 
@@ -129,7 +167,9 @@ Phases are dependency-ordered — each leans on the one before it.
 ```
 Phase 0  setup ─────────────► everything
 Phase 1  db/auth/roles ─────► 2,3,4,5,6 (security foundation; build first)
-Phase 2  admin inventory ──► 3 (catalog), 5 (fulfillment)
+Phase 2  admin inventory ──► 2D–2G (Clover-primary path)
+Phase 2F Clover read sync ─► 3 (catalog) — REQUIRED before customer browse
+Phase 2G Clover write-thru ► production admin + fulfillment truth
 Phase 3  customer browse ──► 4 (scan), 5 (order)
 Phase 4  barcode ──────────► accelerates 2,3,5 (not a blocker)
 Phase 5  pickup ordering ──► 6 (events)
