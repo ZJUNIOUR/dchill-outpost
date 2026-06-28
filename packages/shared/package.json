@@ -11,6 +11,6 @@
     }
   },
   "dependencies": {
-    "@dchill/types": "workspace:*"
+    "@dchill/types": "*"
   }
 }

@@ -6,6 +6,7 @@ Shared TypeScript types aligned with `DATABASE_SCHEMA.sql` and `docs/USER_ROLES.
 
 - `UserRole` — `user_role` enum (including `guest` and `developer` for full schema parity)
 - `PermissionKey` — `permissions.key` catalog (including `catalog.browse` and `owner.protected`)
+- `AuthUser`, `UserProfile`, `SessionState`, `RolePermissionState`, `AuthResult` — auth foundation types (Phase 1B)
 
 ## Security
 

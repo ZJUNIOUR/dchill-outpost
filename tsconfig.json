@@ -2,6 +2,8 @@
   "files": [],
   "references": [
     { "path": "./packages/types" },
-    { "path": "./packages/shared" }
+    { "path": "./packages/shared" },
+    { "path": "./apps/admin" },
+    { "path": "./apps/mobile" }
   ]
 }

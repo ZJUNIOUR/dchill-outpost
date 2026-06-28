@@ -6,19 +6,22 @@ Staff-facing **React + Vite + TypeScript** web app for DChill Outpost.
 
 Operational dashboard: products, inventory, pricing, barcodes, pickup orders, customers, pickup rules, notifications, users/roles, reports, and settings. Access is gated by role + RLS — UI hiding alone is never sufficient.
 
-## Secrets & environment
+## Phase 1B — Supabase client & auth foundation
 
-Copy `.env.example` → `.env`. Use only:
+- `src/lib/supabase.ts` — anon-key client (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
+- `src/auth/index.ts` — `getCurrentSession`, `getCurrentUser`, `signInWithEmail`, `signOut`, `getUserProfile`, `getUserPermissions`
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+**Security:**
 
-**Never** add `SUPABASE_SERVICE_ROLE_KEY`, Clover secrets, or Twilio auth tokens to this app.
-**RLS** is the real security layer; `@dchill/shared` role helpers hide UI only.
+- Clients use the **anon key only** — never the service-role key.
+- **Clover secrets** are server-only (Edge Functions).
+- **RLS** is the real security layer; `@dchill/shared` role helpers and permission lists are UI convenience only.
+
+Copy `apps/admin/.env.example` → `.env` for local development.
 
 ## Status
 
-**Phase 0 scaffold only.** No Vite project, routes, or dependencies installed yet.
+Phase 1B foundation only — **no dashboard pages or operational features yet.**
 
 ## Planned stack
 
@@ -28,8 +31,7 @@ Copy `.env.example` → `.env`. Use only:
 
 ## Next steps (not started)
 
-1. Initialize Vite + React + TS in this directory.
-2. Wire workspace dependencies on `@dchill/types` and `@dchill/shared`.
-3. Build admin shell with role-aware navigation per `docs/BUILD_ORDER.md` Phase 2+.
+1. Initialize Vite + React + TS project shell.
+2. Build role-aware navigation per `docs/BUILD_ORDER.md` Phase 2+.
 
 See `docs/USER_ROLES.md`, `docs/TECHNICAL_ARCHITECTURE.md`, and `docs/FEATURE_REQUIREMENTS.md`.

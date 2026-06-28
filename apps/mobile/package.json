@@ -2,5 +2,11 @@
   "name": "@dchill/mobile",
   "version": "0.0.0",
   "private": true,
-  "description": "DChill Outpost customer mobile app (Expo). Scaffold only — no features yet."
+  "type": "module",
+  "description": "DChill Outpost customer mobile app (Expo). Phase 1B: Supabase client + auth helpers.",
+  "dependencies": {
+    "@dchill/shared": "*",
+    "@dchill/types": "*",
+    "@supabase/supabase-js": "^2.49.8"
+  }
 }

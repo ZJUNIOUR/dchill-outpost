@@ -27,5 +27,6 @@ logs
 
 # TypeScript build output (packages)
 packages/*/dist/
+apps/*/dist/
 
 *.tsbuildinfo
