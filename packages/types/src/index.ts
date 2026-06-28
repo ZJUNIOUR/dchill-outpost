@@ -88,3 +88,76 @@ export interface AuthResult<T> {
   data: T | null;
   error: string | null;
 }
+
+/**
+ * Mirrors `product_status` enum in DATABASE_SCHEMA.sql.
+ */
+export type ProductStatus =
+  | 'in_stock'
+  | 'low_stock'
+  | 'out_of_stock'
+  | 'hidden'
+  | 'admin_only';
+
+/** Row shape from `public.categories`. */
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  parent_id: string | null;
+  sort_order: number;
+  is_active: boolean;
+}
+
+/** Row shape from `public.products` (prices as strings — matches numeric(10,2) without float drift). */
+export interface Product {
+  id: string;
+  name: string;
+  slug: string;
+  category_id: string | null;
+  brand: string | null;
+  sku: string | null;
+  description: string | null;
+  size_unit: string | null;
+  image_url: string | null;
+  base_price: string;
+  sale_price: string | null;
+  is_taxable: boolean;
+  is_featured: boolean;
+  substitution_allowed: boolean;
+  status: ProductStatus;
+  clover_item_id: string | null;
+  clover_sync_status: string;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Row shape from `public.product_barcodes`. */
+export interface ProductBarcode {
+  id: string;
+  product_id: string;
+  barcode: string;
+  is_primary: boolean;
+}
+
+/** Row shape from `public.inventory`. */
+export interface InventoryRecord {
+  product_id: string;
+  quantity_on_hand: number;
+  quantity_reserved: number;
+  low_stock_threshold: number;
+  clover_sync_status: string;
+  last_synced_at: string | null;
+  updated_at: string;
+}
+
+/** Product list row with optional category name for admin tables. */
+export interface ProductWithCategory extends Product {
+  category: Pick<Category, 'id' | 'name' | 'slug'> | null;
+}
+
+/** Inventory row with product label for admin tables. */
+export interface InventoryRecordWithProduct extends InventoryRecord {
+  product: Pick<Product, 'id' | 'name' | 'sku' | 'status'> | null;
+}

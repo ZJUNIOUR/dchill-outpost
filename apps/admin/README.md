@@ -6,24 +6,36 @@ Staff-facing **React + Vite + TypeScript** web app for DChill Outpost.
 
 Operational dashboard: products, inventory, pricing, barcodes, pickup orders, customers, pickup rules, notifications, users/roles, reports, and settings. Access is gated by role + RLS — UI hiding alone is never sufficient.
 
-## Phase 1D — Auth-wired shell
+## Phase 2A — Inventory foundation
 
-Minimal Vite + React app with email/password sign-in and a placeholder dashboard. No operational features yet.
+First operational area: product list, basic create/edit, and raw inventory quantity updates.
 
 **Key files:**
 
-- `src/main.tsx` — app entry
-- `src/App.tsx` — routes (`/login`, `/dashboard`)
-- `src/auth/AuthProvider.tsx`, `src/auth/useAuth.ts` — session context
-- `src/auth/index.ts` — Supabase auth helpers
-- `src/lib/supabase.ts` — anon-key client
-- `src/pages/LoginPage.tsx`, `src/pages/DashboardPlaceholder.tsx`
+- `src/inventory/index.ts` — Supabase data helpers (anon client only)
+- `src/pages/InventoryPage.tsx` — inventory UI
+- `src/components/inventory/*` — product table, forms
+- `src/auth/usePermissions.ts` — permission hints for UI gating
 
-**Security:**
+**What it does:**
 
-- Clients use the **anon key only** — never the service-role key.
-- **Clover secrets** are server-only (Edge Functions).
-- **RLS** is the real security layer; UI role display is convenience only.
+- List products (name, SKU, category, price, active visibility, stock status)
+- Create and edit products through helper functions
+- Toggle customer visibility (`hidden` vs visible statuses)
+- List and update on-hand inventory counts (staff-only raw counts)
+
+**What it does not do yet:** barcodes, images, Clover sync, orders, notifications, reports.
+
+### Required permissions (UI hints)
+
+| Action | Permission key | Notes |
+|--------|----------------|-------|
+| View products | `products.read` | Hides product UI if missing |
+| Create/edit products | `products.write` | RLS also requires this (or `prices.write` for some price edits) |
+| View raw inventory counts | `inventory.read` | Customers never see these in the mobile app |
+| Update quantities | `inventory.write` | Upserts `public.inventory` rows |
+
+**RLS is authoritative.** Permission checks in the UI are convenience only — Postgres policies enforce every query and mutation. If RLS denies an action, the UI shows the database error (including explicit RLS denial messages).
 
 ## Environment variables
 
@@ -51,7 +63,8 @@ npm run dev
 ```
 
 - **Login:** http://localhost:5173/login
-- **Dashboard (after sign-in):** http://localhost:5173/dashboard
+- **Dashboard:** http://localhost:5173/dashboard
+- **Inventory:** http://localhost:5173/inventory
 
 Other scripts:
 
@@ -60,8 +73,10 @@ npm run build -w @dchill/admin    # typecheck + production build
 npm run typecheck -w @dchill/admin
 ```
 
-## Status
+## Security
 
-Phase 1D shell only — **no products, inventory, orders, or settings UI yet.**
+- Clients use the **anon key only** — never the service-role key.
+- **Clover secrets** are server-only (Edge Functions).
+- **RLS** is the real security layer; UI role/permission checks are convenience only.
 
 See `docs/USER_ROLES.md`, `docs/TECHNICAL_ARCHITECTURE.md`, and `docs/BUILD_ORDER.md`.

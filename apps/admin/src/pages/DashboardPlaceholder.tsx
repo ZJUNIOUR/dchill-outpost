@@ -1,9 +1,10 @@
 import type { CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth.js';
 
 /**
- * Placeholder dashboard — no operational features yet (products, orders, inventory, etc.).
+ * Placeholder dashboard — inventory foundation linked; other operational features later.
  * Shown only after authentication; data access still governed by RLS.
  */
 export function DashboardPlaceholder(): JSX.Element {
@@ -19,8 +20,8 @@ export function DashboardPlaceholder(): JSX.Element {
       </header>
 
       <p style={styles.note}>
-        Phase 1D shell only. Row Level Security in Postgres is the real authority — role display
-        below is for UI convenience.
+        Row Level Security in Postgres is the real authority — role display below is for UI
+        convenience only.
       </p>
 
       <section style={styles.card}>
@@ -40,8 +41,13 @@ export function DashboardPlaceholder(): JSX.Element {
       </section>
 
       <section style={styles.card}>
-        <h2>Coming next</h2>
-        <p>Product, inventory, pickup orders, and reports will be added in later phases.</p>
+        <h2>Tools</h2>
+        <ul style={styles.list}>
+          <li>
+            <Link to="/inventory">Inventory &amp; products</Link> — Phase 2A foundation
+          </li>
+        </ul>
+        <p style={styles.muted}>Orders, barcodes, reports, and settings come in later phases.</p>
       </section>
 
       {error && <p style={styles.error}>{error}</p>}
@@ -60,6 +66,8 @@ const styles: Record<string, CSSProperties> = {
     marginTop: '1.25rem',
   },
   dl: { display: 'grid', gridTemplateColumns: '10rem 1fr', gap: '0.5rem 1rem', margin: 0 },
+  list: { margin: '0.5rem 0', paddingLeft: '1.25rem' },
+  muted: { color: '#666', fontSize: '0.9rem', margin: '0.5rem 0 0' },
   button: { padding: '0.5rem 0.85rem', cursor: 'pointer' },
   error: { color: '#b00020' },
 };

@@ -1,0 +1,349 @@
+import type {
+  AuthResult,
+  Category,
+  InventoryRecord,
+  InventoryRecordWithProduct,
+  Product,
+  ProductStatus,
+  ProductWithCategory,
+} from '@dchill/types';
+import type { PostgrestError } from '@supabase/supabase-js';
+
+import { supabase } from '../lib/supabase.js';
+
+const PRODUCT_STATUSES: ReadonlySet<string> = new Set([
+  'in_stock',
+  'low_stock',
+  'out_of_stock',
+  'hidden',
+  'admin_only',
+]);
+
+function formatDbError(error: PostgrestError): string {
+  if (error.code === '42501' || error.message.toLowerCase().includes('row-level security')) {
+    return 'Permission denied — RLS blocked this action. Your role may not have the required permission.';
+  }
+  return error.message;
+}
+
+function parseProductStatus(value: string): ProductStatus | null {
+  return PRODUCT_STATUSES.has(value) ? (value as ProductStatus) : null;
+}
+
+function toPriceString(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '0.00';
+  }
+  return String(value);
+}
+
+function mapProduct(row: Record<string, unknown>): Product | null {
+  const status = parseProductStatus(String(row.status));
+  if (!status) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    slug: String(row.slug),
+    category_id: row.category_id ? String(row.category_id) : null,
+    brand: row.brand ? String(row.brand) : null,
+    sku: row.sku ? String(row.sku) : null,
+    description: row.description ? String(row.description) : null,
+    size_unit: row.size_unit ? String(row.size_unit) : null,
+    image_url: row.image_url ? String(row.image_url) : null,
+    base_price: toPriceString(row.base_price),
+    sale_price: row.sale_price === null || row.sale_price === undefined ? null : toPriceString(row.sale_price),
+    is_taxable: Boolean(row.is_taxable),
+    is_featured: Boolean(row.is_featured),
+    substitution_allowed: Boolean(row.substitution_allowed),
+    status,
+    clover_item_id: row.clover_item_id ? String(row.clover_item_id) : null,
+    clover_sync_status: String(row.clover_sync_status ?? 'local_only'),
+    last_synced_at: row.last_synced_at ? String(row.last_synced_at) : null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
+function mapCategory(row: Record<string, unknown>): Category {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    slug: String(row.slug),
+    parent_id: row.parent_id ? String(row.parent_id) : null,
+    sort_order: Number(row.sort_order),
+    is_active: Boolean(row.is_active),
+  };
+}
+
+function mapInventory(row: Record<string, unknown>): InventoryRecord {
+  return {
+    product_id: String(row.product_id),
+    quantity_on_hand: Number(row.quantity_on_hand),
+    quantity_reserved: Number(row.quantity_reserved),
+    low_stock_threshold: Number(row.low_stock_threshold),
+    clover_sync_status: String(row.clover_sync_status ?? 'local_only'),
+    last_synced_at: row.last_synced_at ? String(row.last_synced_at) : null,
+    updated_at: String(row.updated_at),
+  };
+}
+
+function mapProductWithCategory(row: Record<string, unknown>): ProductWithCategory | null {
+  const product = mapProduct(row);
+  if (!product) {
+    return null;
+  }
+
+  const categoryRaw = row.categories as Record<string, unknown> | Record<string, unknown>[] | null;
+  const categoryRow = Array.isArray(categoryRaw) ? categoryRaw[0] : categoryRaw;
+
+  return {
+    ...product,
+    category: categoryRow
+      ? {
+          id: String(categoryRow.id),
+          name: String(categoryRow.name),
+          slug: String(categoryRow.slug),
+        }
+      : null,
+  };
+}
+
+export interface CreateProductInput {
+  name: string;
+  slug: string;
+  category_id?: string | null;
+  brand?: string | null;
+  sku?: string | null;
+  description?: string | null;
+  size_unit?: string | null;
+  base_price: string;
+  sale_price?: string | null;
+  status?: ProductStatus;
+}
+
+export interface UpdateProductInput {
+  name?: string;
+  slug?: string;
+  category_id?: string | null;
+  brand?: string | null;
+  sku?: string | null;
+  description?: string | null;
+  size_unit?: string | null;
+  base_price?: string;
+  sale_price?: string | null;
+  status?: ProductStatus;
+}
+
+/** Lists products with category name. RLS enforces read access. */
+export async function listProducts(): Promise<AuthResult<ProductWithCategory[]>> {
+  const { data, error } = await supabase
+    .from('products')
+    .select(
+      'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, created_at, updated_at, categories ( id, name, slug )',
+    )
+    .order('name', { ascending: true });
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  const products = (data ?? [])
+    .map((row) => mapProductWithCategory(row as Record<string, unknown>))
+    .filter((row): row is ProductWithCategory => row !== null);
+
+  return { data: products, error: null };
+}
+
+/** Lists active categories for product forms. RLS enforces read access. */
+export async function listCategories(): Promise<AuthResult<Category[]>> {
+  const { data, error } = await supabase
+    .from('categories')
+    .select('id, name, slug, parent_id, sort_order, is_active')
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return {
+    data: (data ?? []).map((row) => mapCategory(row as Record<string, unknown>)),
+    error: null,
+  };
+}
+
+/** Loads one product by id. RLS enforces read access. */
+export async function getProductById(productId: string): Promise<AuthResult<ProductWithCategory>> {
+  const { data, error } = await supabase
+    .from('products')
+    .select(
+      'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, created_at, updated_at, categories ( id, name, slug )',
+    )
+    .eq('id', productId)
+    .maybeSingle();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+  if (!data) {
+    return { data: null, error: 'Product not found.' };
+  }
+
+  const product = mapProductWithCategory(data as Record<string, unknown>);
+  if (!product) {
+    return { data: null, error: 'Product has an invalid status value.' };
+  }
+
+  return { data: product, error: null };
+}
+
+/** Creates a product. Requires `products.write` (enforced by RLS). */
+export async function createProduct(input: CreateProductInput): Promise<AuthResult<Product>> {
+  const { data, error } = await supabase
+    .from('products')
+    .insert({
+      name: input.name,
+      slug: input.slug,
+      category_id: input.category_id ?? null,
+      brand: input.brand ?? null,
+      sku: input.sku ?? null,
+      description: input.description ?? null,
+      size_unit: input.size_unit ?? null,
+      base_price: input.base_price,
+      sale_price: input.sale_price ?? null,
+      status: input.status ?? 'in_stock',
+    })
+    .select(
+      'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, created_at, updated_at',
+    )
+    .single();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  const product = mapProduct(data as Record<string, unknown>);
+  if (!product) {
+    return { data: null, error: 'Created product has an invalid status value.' };
+  }
+
+  return { data: product, error: null };
+}
+
+/** Updates product fields. Requires `products.write` (enforced by RLS). */
+export async function updateProduct(
+  productId: string,
+  input: UpdateProductInput,
+): Promise<AuthResult<Product>> {
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.slug !== undefined) patch.slug = input.slug;
+  if (input.category_id !== undefined) patch.category_id = input.category_id;
+  if (input.brand !== undefined) patch.brand = input.brand;
+  if (input.sku !== undefined) patch.sku = input.sku;
+  if (input.description !== undefined) patch.description = input.description;
+  if (input.size_unit !== undefined) patch.size_unit = input.size_unit;
+  if (input.base_price !== undefined) patch.base_price = input.base_price;
+  if (input.sale_price !== undefined) patch.sale_price = input.sale_price;
+  if (input.status !== undefined) patch.status = input.status;
+
+  const { data, error } = await supabase
+    .from('products')
+    .update(patch)
+    .eq('id', productId)
+    .select(
+      'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, created_at, updated_at',
+    )
+    .single();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  const product = mapProduct(data as Record<string, unknown>);
+  if (!product) {
+    return { data: null, error: 'Updated product has an invalid status value.' };
+  }
+
+  return { data: product, error: null };
+}
+
+/**
+ * Toggles customer visibility via `status` (hidden = inactive, in_stock = active baseline).
+ * Requires `products.write` (enforced by RLS).
+ */
+export async function setProductActive(
+  productId: string,
+  active: boolean,
+): Promise<AuthResult<Product>> {
+  const status: ProductStatus = active ? 'in_stock' : 'hidden';
+  return updateProduct(productId, { status });
+}
+
+/** Lists raw inventory counts (staff-only via RLS). */
+export async function listInventoryRecords(): Promise<AuthResult<InventoryRecordWithProduct[]>> {
+  const { data, error } = await supabase
+    .from('inventory')
+    .select(
+      'product_id, quantity_on_hand, quantity_reserved, low_stock_threshold, clover_sync_status, last_synced_at, updated_at, products ( id, name, sku, status )',
+    )
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  const records: InventoryRecordWithProduct[] = (data ?? []).map((row) => {
+    const inventory = mapInventory(row as Record<string, unknown>);
+    const productRaw = row.products as Record<string, unknown> | Record<string, unknown>[] | null;
+    const productRow = Array.isArray(productRaw) ? productRaw[0] : productRaw;
+
+    return {
+      ...inventory,
+      product: productRow
+        ? {
+            id: String(productRow.id),
+            name: String(productRow.name),
+            sku: productRow.sku ? String(productRow.sku) : null,
+            status: parseProductStatus(String(productRow.status)) ?? 'in_stock',
+          }
+        : null,
+    };
+  });
+
+  return { data: records, error: null };
+}
+
+/** Sets on-hand quantity (upsert). Requires `inventory.write` (enforced by RLS). */
+export async function updateInventoryQuantity(
+  productId: string,
+  quantityOnHand: number,
+): Promise<AuthResult<InventoryRecord>> {
+  if (!Number.isInteger(quantityOnHand) || quantityOnHand < 0) {
+    return { data: null, error: 'Quantity must be a non-negative whole number.' };
+  }
+
+  const { data, error } = await supabase
+    .from('inventory')
+    .upsert(
+      {
+        product_id: productId,
+        quantity_on_hand: quantityOnHand,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'product_id' },
+    )
+    .select(
+      'product_id, quantity_on_hand, quantity_reserved, low_stock_threshold, clover_sync_status, last_synced_at, updated_at',
+    )
+    .single();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return { data: mapInventory(data as Record<string, unknown>), error: null };
+}
