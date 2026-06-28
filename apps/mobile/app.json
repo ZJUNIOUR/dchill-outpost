@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "DChill Outpost",
+    "slug": "dchill-outpost",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": ["ios", "android"]
+  }
+}
