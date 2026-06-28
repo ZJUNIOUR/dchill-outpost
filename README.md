@@ -4,6 +4,13 @@ Pickup-only Caribbean/international grocery app (Supabase + React Native/Expo +
 React admin), with Clover for payments and a database-enforced, Owner-protected
 RBAC system. See `docs/PROJECT_BRIEF.md`, `docs/TECHNICAL_ARCHITECTURE.md`, and `AGENTS.md`.
 
+## Client configuration & secrets
+
+- **Clients (mobile + admin)** may use only `SUPABASE_URL` and `SUPABASE_ANON_KEY` — public by design.
+- **Service-role keys**, Clover app secrets, OAuth tokens, and Twilio auth tokens are **server-only** (Supabase Edge Functions / CI secrets). Never commit them or ship them in app bundles.
+- **RLS is the security source of truth**; shared RBAC helpers in `@dchill/shared` are for UI gating only.
+- Copy `.env.example` → `.env` locally; see `apps/mobile/.env.example`, `apps/admin/.env.example`, and `supabase/.env.example`.
+
 ## Security / RLS test suite
 
 Row Level Security is the source of truth for app permissions, so a missing

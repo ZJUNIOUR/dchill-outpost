@@ -6,6 +6,16 @@ Staff-facing **React + Vite + TypeScript** web app for DChill Outpost.
 
 Operational dashboard: products, inventory, pricing, barcodes, pickup orders, customers, pickup rules, notifications, users/roles, reports, and settings. Access is gated by role + RLS — UI hiding alone is never sufficient.
 
+## Secrets & environment
+
+Copy `.env.example` → `.env`. Use only:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+**Never** add `SUPABASE_SERVICE_ROLE_KEY`, Clover secrets, or Twilio auth tokens to this app.
+**RLS** is the real security layer; `@dchill/shared` role helpers hide UI only.
+
 ## Status
 
 **Phase 0 scaffold only.** No Vite project, routes, or dependencies installed yet.
@@ -15,10 +25,6 @@ Operational dashboard: products, inventory, pricing, barcodes, pickup orders, cu
 - React + Vite + TypeScript
 - TanStack Query + Supabase client (URL + anon key only)
 - Realtime subscriptions for order queue and low-stock alerts
-
-## Secrets
-
-Never import the Supabase service-role key, Clover credentials, or any backend secret into this package.
 
 ## Next steps (not started)
 

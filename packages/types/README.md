@@ -1,21 +1,21 @@
 # Types package (`@dchill/types`)
 
-Shared TypeScript types for DChill Outpost clients and packages.
+Shared TypeScript types aligned with `DATABASE_SCHEMA.sql` and `docs/USER_ROLES.md`.
 
-## Status
+## Phase 1A — included now
 
-**Phase 0 scaffold only.** Placeholder export; domain types will align with `DATABASE_SCHEMA.sql` in Phase 1+.
+- `UserRole` — `user_role` enum (including `guest` and `developer` for full schema parity)
+- `PermissionKey` — `permissions.key` catalog (including `catalog.browse` and `owner.protected`)
 
-## Intended contents (future)
+## Security
 
-- Database row types and enums (`user_role`, `order_status`, etc.)
-- API request/response shapes for Edge Functions (public surfaces only — no secrets)
-- Permission keys matching `role_permissions`
+Types describe data shapes only. **Authorization is enforced by RLS + triggers**, not by TypeScript.
+Clients must not embed service-role keys or Clover secrets — see root `.env.example` and `AGENTS.md`.
 
-## Usage (future)
+## Usage
 
 ```ts
-import {} from '@dchill/types';
+import type { UserRole, PermissionKey } from '@dchill/types';
 ```
 
-Keep in sync with schema migrations; never embed credentials or service-role types for client use.
+Constants and helpers live in `@dchill/shared`.

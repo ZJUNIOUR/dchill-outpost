@@ -18,9 +18,15 @@ Pickup-only MVP: browse catalog, scan barcodes, build a cart, pay via **Clover H
 - Supabase client (URL + anon key only — no service-role key)
 - Barcode scanning via `expo-camera` `CameraView` (`onBarcodeScanned`)
 
-## Secrets
+## Secrets & environment
 
-Never import the Supabase service-role key, Clover credentials, or any backend secret into this package. Checkout receives only a hosted URL from an Edge Function.
+Copy `.env.example` → `.env`. Use only:
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+
+**Never** add `SUPABASE_SERVICE_ROLE_KEY`, Clover client secrets, or access tokens to this app.
+Checkout uses a **Clover Hosted Checkout URL** from an Edge Function. **RLS** enforces data access — UI role checks are courtesy only.
 
 ## Next steps (not started)
 

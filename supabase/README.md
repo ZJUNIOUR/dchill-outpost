@@ -23,6 +23,14 @@ The security gate and CI still apply these **from the repo root**:
 
 Run locally: `npm run test:security` (requires PostgreSQL 15+ and `psql`).
 
+## Environment & secrets
+
+Copy `.env.example` → `.env` for local Edge Function development.
+
+- **Server-only:** `SUPABASE_SERVICE_ROLE_KEY`, Clover app secret, OAuth/merchant tokens, Twilio auth token — Supabase project secrets or CI only.
+- **Never** expose service-role or Clover credentials to mobile/admin clients or Technology Specialist dashboards.
+- Clients use public `SUPABASE_URL` + `SUPABASE_ANON_KEY`; **RLS** enforces who can do what.
+
 When the Supabase CLI workflow is wired up, mirror or migrate root SQL into `migrations/` without breaking the existing runner until CI is updated.
 
 ## Rules
