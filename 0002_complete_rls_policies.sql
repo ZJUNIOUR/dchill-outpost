@@ -115,7 +115,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   roles, permissions, role_permissions
 TO authenticated;
 
-GRANT SELECT ON payments, notifications TO authenticated;     -- writes = service role only
+GRANT SELECT ON notifications TO authenticated;                 -- writes = service role only
+-- payments: column-level SELECT only (raw_event is service-role-only; see policies below)
+REVOKE ALL ON payments FROM anon, authenticated;
+GRANT SELECT (
+  id, order_id, provider, clover_checkout_session_id, clover_payment_id,
+  amount, currency, status, created_at
+) ON payments TO authenticated;
 GRANT SELECT, INSERT ON audit_logs TO authenticated;          -- append-only (no UPDATE/DELETE)
 
 GRANT SELECT ON
@@ -268,8 +274,7 @@ DROP POLICY IF EXISTS payments_staff_read ON payments;
 CREATE POLICY payments_staff_read ON payments FOR SELECT
   USING ( is_elevated_role() );                              -- reconciliation (manager/admin/ts/owner)
 -- No INSERT/UPDATE/DELETE policies => only the service role (Edge Functions) writes payments.
--- Column-level: raw provider webhook payload is never exposed to app roles.
-REVOKE SELECT (raw_event) ON payments FROM authenticated, anon;
+-- raw_event is omitted from the column-level SELECT grant above; only service_role can read it.
 
 -- ---- NOTIFICATIONS (internals are operational; customers get the real SMS/email, not this table) ----
 DROP POLICY IF EXISTS notifications_read ON notifications;
