@@ -1,6 +1,9 @@
 import type {
   AuthResult,
   Category,
+  InventoryLog,
+  InventoryLogReason,
+  InventoryLogWithProduct,
   InventoryRecord,
   InventoryRecordWithProduct,
   Product,
@@ -10,6 +13,7 @@ import type {
 } from '@dchill/types';
 import type { PostgrestError } from '@supabase/supabase-js';
 
+import { getCurrentUser } from '../auth/index.js';
 import { supabase } from '../lib/supabase.js';
 
 const PRODUCT_STATUSES: ReadonlySet<string> = new Set([
@@ -19,6 +23,21 @@ const PRODUCT_STATUSES: ReadonlySet<string> = new Set([
   'hidden',
   'admin_only',
 ]);
+
+/** Documented manual-adjustment reasons (maps to `inventory_logs.reason` TEXT). */
+export const INVENTORY_LOG_REASONS: readonly InventoryLogReason[] = [
+  'manual',
+  'restock',
+  'order_accepted',
+  'order_canceled',
+] as const;
+
+/**
+ * Stock update + log insert from the admin client are separate HTTP requests — not atomic.
+ * Order flows and production adjustments should use a SECURITY DEFINER RPC or Edge Function later.
+ */
+export const INVENTORY_ADJUSTMENT_NON_ATOMIC =
+  'Inventory was updated in a separate request from the log row. Atomic stock adjustments require a future database RPC or Edge Function.';
 
 function formatDbError(error: PostgrestError): string {
   if (error.code === '42501' || error.message.toLowerCase().includes('row-level security')) {
@@ -107,6 +126,58 @@ function slugify(value: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
+
+function mapInventoryLog(row: Record<string, unknown>): InventoryLog {
+  return {
+    id: String(row.id),
+    product_id: String(row.product_id),
+    change_qty: Number(row.change_qty),
+    new_quantity: Number(row.new_quantity),
+    reason: String(row.reason),
+    user_id: row.user_id ? String(row.user_id) : null,
+    order_id: row.order_id ? String(row.order_id) : null,
+    created_at: String(row.created_at),
+  };
+}
+
+function mapInventoryLogWithProduct(row: Record<string, unknown>): InventoryLogWithProduct {
+  const log = mapInventoryLog(row);
+
+  const productRaw = row.products as Record<string, unknown> | Record<string, unknown>[] | null;
+  const productRow = Array.isArray(productRaw) ? productRaw[0] : productRaw;
+
+  const userRaw = row.users as Record<string, unknown> | Record<string, unknown>[] | null;
+  const userRow = Array.isArray(userRaw) ? userRaw[0] : userRaw;
+
+  return {
+    ...log,
+    product: productRow
+      ? {
+          id: String(productRow.id),
+          name: String(productRow.name),
+          sku: productRow.sku ? String(productRow.sku) : null,
+        }
+      : null,
+    actor: userRow
+      ? {
+          id: String(userRow.id),
+          full_name: String(userRow.full_name),
+          email: userRow.email ? String(userRow.email) : null,
+        }
+      : null,
+  };
+}
+
+function formatLogReason(reason: InventoryLogReason, note?: string): string {
+  const trimmed = note?.trim();
+  if (!trimmed) {
+    return reason;
+  }
+  return `${reason}: ${trimmed}`;
+}
+
+const INVENTORY_LOG_SELECT =
+  'id, product_id, change_qty, new_quantity, reason, user_id, order_id, created_at, products ( id, name, sku ), users ( id, full_name, email )';
 
 function mapProductWithCategory(row: Record<string, unknown>): ProductWithCategory | null {
   const product = mapProduct(row);
@@ -364,6 +435,162 @@ export async function updateInventoryQuantity(
   }
 
   return { data: mapInventory(data as Record<string, unknown>), error: null };
+}
+
+/** Lists recent inventory log rows (staff-only via RLS). */
+export async function listInventoryLogs(limit = 100): Promise<AuthResult<InventoryLogWithProduct[]>> {
+  const { data, error } = await supabase
+    .from('inventory_logs')
+    .select(INVENTORY_LOG_SELECT)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return {
+    data: (data ?? []).map((row) => mapInventoryLogWithProduct(row as Record<string, unknown>)),
+    error: null,
+  };
+}
+
+/** Lists inventory log rows for one product (staff-only via RLS). */
+export async function listInventoryLogsForProduct(
+  productId: string,
+  limit = 100,
+): Promise<AuthResult<InventoryLogWithProduct[]>> {
+  const { data, error } = await supabase
+    .from('inventory_logs')
+    .select(INVENTORY_LOG_SELECT)
+    .eq('product_id', productId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return {
+    data: (data ?? []).map((row) => mapInventoryLogWithProduct(row as Record<string, unknown>)),
+    error: null,
+  };
+}
+
+export interface CreateInventoryLogInput {
+  product_id: string;
+  change_qty: number;
+  new_quantity: number;
+  reason: string;
+  order_id?: string | null;
+  user_id?: string | null;
+}
+
+/**
+ * Inserts one `inventory_logs` row. Requires `inventory.write` (RLS `inv_logs_insert`).
+ * Append-only — no update/delete policies on this table.
+ */
+export async function createInventoryLog(
+  input: CreateInventoryLogInput,
+): Promise<AuthResult<InventoryLog>> {
+  let userId = input.user_id ?? null;
+  if (userId === null) {
+    const userResult = await getCurrentUser();
+    if (userResult.error) {
+      return { data: null, error: userResult.error };
+    }
+    userId = userResult.data?.id ?? null;
+  }
+
+  const { data, error } = await supabase
+    .from('inventory_logs')
+    .insert({
+      product_id: input.product_id,
+      change_qty: input.change_qty,
+      new_quantity: input.new_quantity,
+      reason: input.reason,
+      user_id: userId,
+      order_id: input.order_id ?? null,
+    })
+    .select('id, product_id, change_qty, new_quantity, reason, user_id, order_id, created_at')
+    .single();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+
+  return { data: mapInventoryLog(data as Record<string, unknown>), error: null };
+}
+
+export interface AdjustInventoryWithLogInput {
+  productId: string;
+  newQuantityOnHand: number;
+  reason: InventoryLogReason;
+  note?: string;
+}
+
+export interface AdjustInventoryWithLogResult {
+  inventory: InventoryRecord;
+  log: InventoryLog | null;
+  /** Set when inventory updated but log insert failed (non-atomic client limitation). */
+  partialFailure: boolean;
+}
+
+/**
+ * Updates on-hand quantity then inserts a log row — two separate requests (not atomic).
+ * Requires `inventory.write` for both steps. See `INVENTORY_ADJUSTMENT_NON_ATOMIC`.
+ */
+export async function adjustInventoryQuantityWithLog(
+  input: AdjustInventoryWithLogInput,
+): Promise<AuthResult<AdjustInventoryWithLogResult>> {
+  if (!Number.isInteger(input.newQuantityOnHand) || input.newQuantityOnHand < 0) {
+    return { data: null, error: 'Quantity must be a non-negative whole number.' };
+  }
+
+  const { data: currentRow, error: readError } = await supabase
+    .from('inventory')
+    .select('quantity_on_hand')
+    .eq('product_id', input.productId)
+    .maybeSingle();
+
+  if (readError) {
+    return { data: null, error: formatDbError(readError) };
+  }
+
+  const previousQty = currentRow ? Number(currentRow.quantity_on_hand) : 0;
+  const changeQty = input.newQuantityOnHand - previousQty;
+
+  const updateResult = await updateInventoryQuantity(input.productId, input.newQuantityOnHand);
+  if (updateResult.error || !updateResult.data) {
+    return { data: null, error: updateResult.error ?? 'Inventory update failed.' };
+  }
+
+  const logResult = await createInventoryLog({
+    product_id: input.productId,
+    change_qty: changeQty,
+    new_quantity: input.newQuantityOnHand,
+    reason: formatLogReason(input.reason, input.note),
+  });
+
+  if (logResult.error || !logResult.data) {
+    return {
+      data: {
+        inventory: updateResult.data,
+        log: null,
+        partialFailure: true,
+      },
+      error: `Inventory updated to ${input.newQuantityOnHand}, but log insert failed: ${logResult.error ?? 'unknown error'}. ${INVENTORY_ADJUSTMENT_NON_ATOMIC}`,
+    };
+  }
+
+  return {
+    data: {
+      inventory: updateResult.data,
+      log: logResult.data,
+      partialFailure: false,
+    },
+    error: null,
+  };
 }
 
 export interface CreateCategoryInput {

@@ -12,26 +12,34 @@ Product list, basic create/edit, and raw inventory quantity updates.
 
 ## Phase 2B — Categories & barcodes
 
-Extends the inventory page with category management and manual product barcode CRUD (no camera scanner).
+Category management and manual product barcode CRUD (no camera scanner).
+
+## Phase 2C — Inventory logs & adjustments
+
+Inventory history visibility and stock adjustments that write `inventory_logs` rows.
 
 **Key files:**
 
 - `src/inventory/index.ts` — Supabase data helpers (anon client only)
 - `src/pages/InventoryPage.tsx` — inventory UI
-- `src/components/inventory/CategoryManager.tsx` — category list + create/edit/active
-- `src/components/inventory/ProductBarcodeManager.tsx` — barcode list/add/edit/delete per product
+- `src/components/inventory/InventoryLogTable.tsx` — log history + product filter
+- `src/components/inventory/InventoryAdjustmentForm.tsx` — adjust qty with reason/note
 - `src/auth/usePermissions.ts` — permission hints for UI gating
 
 **What it does:**
 
-- **Products:** list, create/edit, toggle visibility (`hidden` vs visible statuses)
-- **Categories:** list, create/edit, activate/deactivate (`is_active`)
-- **Barcodes:** list per product, add/edit/delete rows in `product_barcodes` (`barcode`, `is_primary`)
-- **Inventory:** list and update on-hand counts (staff-only raw counts)
+- **Products / categories / barcodes:** (Phase 2A–2B)
+- **Inventory counts:** list on-hand/reserved quantities (staff-only)
+- **Adjustments:** set new on-hand qty with `manual` or `restock` reason + optional note
+- **History:** read append-only `inventory_logs` (change, new qty, reason, actor, timestamp)
 
-**Schema note:** `product_barcodes` has no `barcode_type` column — only `barcode` (unique) and `is_primary`.
+**Schema (`inventory_logs`):** `id`, `product_id`, `change_qty`, `new_quantity`, `reason` (TEXT), `user_id`, `order_id`, `created_at`. No separate note column — notes are appended to `reason` (e.g. `manual: damaged units removed`). No `barcode_type` or adjustment enum in the database.
 
-**What it does not do yet:** camera/scanner UI, customer catalog, images, Clover sync, orders, notifications, reports.
+### Atomic adjustment limitation
+
+`adjustInventoryQuantityWithLog()` updates `inventory` and inserts `inventory_logs` as **two separate anon-client requests**. If the log insert fails after the inventory row updates, the UI reports a partial failure. **Production order flows and guaranteed atomic stock changes require a future SECURITY DEFINER RPC or Edge Function** — not implemented in this phase.
+
+`updateInventoryQuantity()` remains available for direct upserts without logging (Phase 2A); the inventory page uses the adjustment form with logging instead.
 
 ### Required permissions (UI hints)
 
@@ -39,12 +47,14 @@ Extends the inventory page with category management and manual product barcode C
 |--------|----------------|-------|
 | View products / categories | `products.read` | Hides catalog UI if missing |
 | Create/edit products | `products.write` | RLS also requires this (or `prices.write` for some price edits) |
-| Create/edit categories | `products.write` | RLS `categories_write` policy uses `products.write` |
-| View raw inventory counts | `inventory.read` | Customers never see these in the mobile app |
-| Update quantities | `inventory.write` | Upserts `public.inventory` rows |
+| Create/edit categories | `products.write` | RLS `categories_write` policy |
+| View raw inventory + logs | `inventory.read` | RLS log SELECT uses `is_staff_or_above()`; customers never see counts |
+| Update quantities / insert logs | `inventory.write` | RLS `inventory_write` + `inv_logs_insert` |
 | Add/edit/delete barcodes | `barcodes.manage` | RLS `barcodes_write` policy |
 
-**RLS is authoritative.** Permission checks in the UI are convenience only — Postgres policies enforce every query and mutation. If RLS denies an action, the UI shows the database error (including explicit RLS denial messages).
+**RLS is authoritative.** Permission checks in the UI are convenience only — Postgres policies enforce every query and mutation.
+
+**What it does not do yet:** camera/scanner UI, customer catalog, images, Clover sync, orders, notifications, reports, atomic stock RPC.
 
 ## Environment variables
 

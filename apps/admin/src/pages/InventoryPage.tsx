@@ -1,21 +1,23 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PERMISSION } from '@dchill/shared';
-import type { Category, InventoryRecordWithProduct, ProductWithCategory } from '@dchill/types';
+import type { Category, InventoryLogWithProduct, InventoryRecordWithProduct, ProductWithCategory } from '@dchill/types';
 
 import { usePermissions } from '../auth/usePermissions.js';
 import { CategoryManager } from '../components/inventory/CategoryManager.js';
-import { InventoryQuantityForm } from '../components/inventory/InventoryQuantityForm.js';
+import { InventoryAdjustmentForm } from '../components/inventory/InventoryAdjustmentForm.js';
+import { InventoryLogTable } from '../components/inventory/InventoryLogTable.js';
 import { ProductBarcodeManager } from '../components/inventory/ProductBarcodeManager.js';
 import { ProductForm } from '../components/inventory/ProductForm.js';
 import { ProductTable } from '../components/inventory/ProductTable.js';
 import {
+  adjustInventoryQuantityWithLog,
   createProduct,
   listCategories,
+  listInventoryLogs,
   listInventoryRecords,
   listProducts,
   setProductActive,
-  updateInventoryQuantity,
   updateProduct,
   type CreateProductInput,
   type UpdateProductInput,
@@ -38,6 +40,7 @@ export function InventoryPage(): JSX.Element {
 
   const [products, setProducts] = useState<ProductWithCategory[]>([]);
   const [inventory, setInventory] = useState<InventoryRecordWithProduct[]>([]);
+  const [inventoryLogs, setInventoryLogs] = useState<InventoryLogWithProduct[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -46,6 +49,7 @@ export function InventoryPage(): JSX.Element {
   const [editingProduct, setEditingProduct] = useState<ProductWithCategory | null>(null);
   const [inventoryTarget, setInventoryTarget] = useState<ProductWithCategory | null>(null);
   const [barcodeProductId, setBarcodeProductId] = useState('');
+  const [logFilterProductId, setLogFilterProductId] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const inventoryByProductId = useMemo(() => {
@@ -83,14 +87,23 @@ export function InventoryPage(): JSX.Element {
     }
 
     if (canReadInventory) {
-      const inventoryResult = await listInventoryRecords();
+      const [inventoryResult, logsResult] = await Promise.all([
+        listInventoryRecords(),
+        listInventoryLogs(),
+      ]);
       if (inventoryResult.error) {
         errors.push(inventoryResult.error);
       } else {
         setInventory(inventoryResult.data ?? []);
       }
+      if (logsResult.error) {
+        errors.push(logsResult.error);
+      } else {
+        setInventoryLogs(logsResult.data ?? []);
+      }
     } else {
       setInventory([]);
+      setInventoryLogs([]);
     }
 
     if (errors.length > 0) {
@@ -150,15 +163,27 @@ export function InventoryPage(): JSX.Element {
     await loadData();
   }
 
-  async function handleInventoryUpdate(quantity: number): Promise<void> {
+  async function handleInventoryAdjustment(input: {
+    newQuantityOnHand: number;
+    reason: 'manual' | 'restock' | 'order_accepted' | 'order_canceled';
+    note?: string;
+  }): Promise<void> {
     if (!inventoryTarget) {
       return;
     }
     setSubmitting(true);
     setActionError(null);
-    const result = await updateInventoryQuantity(inventoryTarget.id, quantity);
+    const result = await adjustInventoryQuantityWithLog({
+      productId: inventoryTarget.id,
+      newQuantityOnHand: input.newQuantityOnHand,
+      reason: input.reason,
+      note: input.note,
+    });
     if (result.error) {
       setActionError(result.error);
+      if (result.data?.partialFailure) {
+        await loadData();
+      }
       setSubmitting(false);
       return;
     }
@@ -173,7 +198,7 @@ export function InventoryPage(): JSX.Element {
         <div>
           <h1 style={styles.h1}>Inventory</h1>
           <p style={styles.note}>
-            Phase 2A–2B. UI permission hints below are not security — RLS in Postgres enforces
+            Phase 2A–2C. UI permission hints below are not security — RLS in Postgres enforces
             every read and write.
           </p>
         </div>
@@ -334,7 +359,7 @@ export function InventoryPage(): JSX.Element {
                 )}
 
                 {inventoryTarget && canWriteInventory && (
-                  <InventoryQuantityForm
+                  <InventoryAdjustmentForm
                     productId={inventoryTarget.id}
                     productName={inventoryTarget.name}
                     currentQuantity={
@@ -342,7 +367,7 @@ export function InventoryPage(): JSX.Element {
                     }
                     submitting={submitting}
                     error={actionError}
-                    onSubmit={handleInventoryUpdate}
+                    onSubmit={handleInventoryAdjustment}
                   />
                 )}
 
@@ -353,6 +378,21 @@ export function InventoryPage(): JSX.Element {
                 )}
               </>
             )}
+          </section>
+
+          <section style={styles.section}>
+            <h2>Inventory history</h2>
+            <p style={styles.note}>
+              Append-only audit rows from <code>inventory_logs</code>. RLS allows staff SELECT;
+              inserts require <code>inventory.write</code>.
+            </p>
+            <InventoryLogTable
+              logs={inventoryLogs}
+              products={products}
+              filterProductId={logFilterProductId}
+              onFilterProductIdChange={setLogFilterProductId}
+              canRead={canReadInventory}
+            />
           </section>
 
           <section style={styles.section}>

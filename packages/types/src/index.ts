@@ -166,3 +166,31 @@ export interface ProductWithCategory extends Product {
 export interface InventoryRecordWithProduct extends InventoryRecord {
   product: Pick<Product, 'id' | 'name' | 'sku' | 'status'> | null;
 }
+
+/**
+ * Documented values for `inventory_logs.reason` (TEXT column — not a DB enum).
+ * Schema comment: order_accepted | order_canceled | manual | restock
+ */
+export type InventoryLogReason =
+  | 'order_accepted'
+  | 'order_canceled'
+  | 'manual'
+  | 'restock';
+
+/** Row shape from `public.inventory_logs`. */
+export interface InventoryLog {
+  id: string;
+  product_id: string;
+  change_qty: number;
+  new_quantity: number;
+  reason: string;
+  user_id: string | null;
+  order_id: string | null;
+  created_at: string;
+}
+
+/** Inventory log with product label and actor (when RLS allows user join). */
+export interface InventoryLogWithProduct extends InventoryLog {
+  product: Pick<Product, 'id' | 'name' | 'sku'> | null;
+  actor: Pick<UserProfile, 'id' | 'full_name' | 'email'> | null;
+}
