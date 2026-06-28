@@ -87,6 +87,9 @@ INSERT INTO _fix(label, id) VALUES
   ('customer', '66666666-6666-6666-6666-666666666666'),
   ('subject',  '77777777-7777-7777-7777-777777777777');  -- created by the TS during ALLOWED tests
 
+-- Fixture UUIDs inlined into SQL executed as `authenticated` (app roles cannot read _fix).
+-- Privileged assertions below may still resolve ids via _fix.
+
 INSERT INTO public.users (id, email, phone, full_name, role, is_active) VALUES
   ((SELECT id FROM _fix WHERE label='owner'),    'owner@dchill.test',    '+15550000001', 'Owner Admin',  'owner_admin',          true),
   ((SELECT id FROM _fix WHERE label='ts'),       'ts@dchill.test',       '+15550000002', 'Tech Spec',    'technology_specialist',true),
@@ -96,9 +99,9 @@ INSERT INTO public.users (id, email, phone, full_name, role, is_active) VALUES
   ((SELECT id FROM _fix WHERE label='customer'), 'customer@dchill.test', '+15550000006', 'A Customer',   'customer',             true);
 
 -- ---------------------------------------------------------------------
--- 2. Helper: run an arbitrary statement AS the Technology Specialist.
---    Returns whether it raised, the message, and rows affected. Restores
---    the privileged role before returning so ground-truth reads are honest.
+-- 2. Helpers: run SQL AS the Technology Specialist; log/assert as postgres.
+--    SQL passed to _as_ts must use literal fixture UUIDs — never _fix — so
+--    authenticated never touches harness tables during the action under test.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION _as_ts(p_sql text)
 RETURNS TABLE(raised boolean, errmsg text, rows_affected bigint)
@@ -107,7 +110,7 @@ DECLARE r bigint := 0;
 BEGIN
   PERFORM set_config(
     'request.jwt.claims',
-    json_build_object('sub', (SELECT id FROM _fix WHERE label='ts'), 'role', 'authenticated')::text,
+    json_build_object('sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text,
     true);                               -- transaction-local claim => auth.uid() = the TS
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
@@ -121,17 +124,46 @@ BEGIN
   RETURN NEXT;
 END $$;
 
+CREATE OR REPLACE FUNCTION _is_harness_error(p_errmsg text)
+RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+  SELECT p_errmsg IS NOT NULL AND p_errmsg ILIKE '%_fix%';
+$$;
+
 CREATE OR REPLACE FUNCTION _mech(
   p_raised boolean,
   p_errmsg text,
   p_rows_affected bigint
 ) RETURNS text LANGUAGE plpgsql AS $$
 BEGIN
+  IF _is_harness_error(p_errmsg) THEN
+    RETURN 'INVALID — harness error (not a security block): ' || left(p_errmsg, 70);
+  END IF;
   RETURN CASE
     WHEN p_raised             THEN 'blocked by exception: ' || left(coalesce(p_errmsg, ''), 70)
     WHEN p_rows_affected = 0  THEN 'blocked silently (RLS USING filtered the row; 0 rows)'
     ELSE 'NOT BLOCKED — ' || p_rows_affected || ' row(s) affected'
   END;
+END $$;
+
+CREATE OR REPLACE FUNCTION _forbidden_pass(
+  p_state_ok boolean,
+  p_raised boolean,
+  p_errmsg text,
+  p_rows_affected bigint
+) RETURNS boolean LANGUAGE plpgsql AS $$
+BEGIN
+  IF _is_harness_error(p_errmsg) THEN RETURN false; END IF;
+  RETURN p_state_ok AND (p_raised OR p_rows_affected = 0);
+END $$;
+
+CREATE OR REPLACE FUNCTION _allowed_pass(
+  p_state_ok boolean,
+  p_raised boolean,
+  p_errmsg text
+) RETURNS boolean LANGUAGE plpgsql AS $$
+BEGIN
+  IF _is_harness_error(p_errmsg) THEN RETURN false; END IF;
+  RETURN p_state_ok AND NOT p_raised;
 END $$;
 
 -- =====================================================================
@@ -144,12 +176,12 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET role='owner_admin'
-        WHERE id=(SELECT id FROM _fix WHERE label='manager') $q$);
+        WHERE id='33333333-3333-3333-3333-333333333333'::uuid $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='manager')) = 'manager'
         AND (SELECT count(*) FROM public.users WHERE role='owner_admin') = 1;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','1. Assign owner_admin to a manager',
-     'rejected; manager unchanged; owner_admin count stays 1', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; manager unchanged; owner_admin count stays 1', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- 2. Remove owner_admin from the owner (set to inventory_staff) -------
@@ -158,12 +190,12 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET role='inventory_staff'
-        WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);
+        WHERE id='11111111-1111-1111-1111-111111111111'::uuid $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = 'owner_admin'
         AND (SELECT count(*) FROM public.users WHERE role='owner_admin') = 1;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','2. Remove owner_admin role from the owner',
-     'rejected; owner still owner_admin', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; owner still owner_admin', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- 3. Demote an owner_admin (set to manager) ----------------------------
@@ -172,11 +204,11 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET role='manager'
-        WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);
+        WHERE id='11111111-1111-1111-1111-111111111111'::uuid $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = 'owner_admin';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','3. Demote an owner_admin',
-     'rejected; owner still owner_admin', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; owner still owner_admin', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- 4. Delete an owner_admin account -------------------------------------
@@ -184,12 +216,12 @@ DO $$
 DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
-    $q$ DELETE FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);
+    $q$ DELETE FROM public.users WHERE id='11111111-1111-1111-1111-111111111111'::uuid $q$);
   ok := EXISTS (SELECT 1 FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner'))
         AND (SELECT count(*) FROM public.users WHERE role='owner_admin') = 1;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','4. Delete an owner_admin account',
-     'rejected; owner row still present', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; owner row still present', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- 5. Deactivate an owner_admin account ---------------------------------
@@ -198,11 +230,11 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET is_active=false
-        WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);
+        WHERE id='11111111-1111-1111-1111-111111111111'::uuid $q$);
   ok := (SELECT is_active FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = true;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','5. Deactivate an owner_admin account',
-     'rejected; owner still active', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; owner still active', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- 6. Edit an owner_admin's email ---------------------------------------
@@ -212,11 +244,11 @@ BEGIN
   SELECT email INTO orig FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner');
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET email='attacker@evil.test'
-        WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);
+        WHERE id='11111111-1111-1111-1111-111111111111'::uuid $q$);
   ok := (SELECT email FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = orig;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','6. Edit an owner_admin''s email',
-     'rejected; owner email unchanged', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; owner email unchanged', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- 7. Edit an owner_admin's phone ---------------------------------------
@@ -226,11 +258,11 @@ BEGIN
   SELECT phone INTO orig FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner');
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET phone='+19999999999'
-        WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);
+        WHERE id='11111111-1111-1111-1111-111111111111'::uuid $q$);
   ok := (SELECT phone FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = orig;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','7. Edit an owner_admin''s phone',
-     'rejected; owner phone unchanged', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; owner phone unchanged', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- 8. Edit an owner_admin's login credentials ---------------------------
@@ -244,11 +276,11 @@ BEGIN
   IF to_regclass('auth.users') IS NOT NULL THEN
     SELECT * INTO res FROM _as_ts(
       $q$ UPDATE auth.users SET email='attacker@evil.test'
-          WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);
+          WHERE id='11111111-1111-1111-1111-111111111111'::uuid $q$);
     ok := res.raised OR res.rows_affected = 0;
     INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
       ('FORBIDDEN','8. Edit an owner_admin''s login credentials (auth.users)',
-       'rejected; no auth.users row changed', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+       'rejected; no auth.users row changed', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
   ELSE
     INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
       ('FORBIDDEN','8. Edit an owner_admin''s login credentials (auth.users)',
@@ -263,13 +295,16 @@ DECLARE r1 record; r2 record; ok boolean;
 BEGIN
   SELECT * INTO r1 FROM _as_ts(
     $q$ UPDATE public.users SET role='owner_admin'
-        WHERE id=(SELECT id FROM _fix WHERE label='manager') $q$);   -- crown a new owner
+        WHERE id='33333333-3333-3333-3333-333333333333'::uuid $q$);   -- crown a new owner
   SELECT * INTO r2 FROM _as_ts(
     $q$ UPDATE public.users SET role='staff'
-        WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);     -- dethrone the old one
+        WHERE id='11111111-1111-1111-1111-111111111111'::uuid $q$);     -- dethrone the old one
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='manager')) = 'manager'
         AND (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = 'owner_admin'
         AND (SELECT count(*) FROM public.users WHERE role='owner_admin') = 1;
+  ok := ok
+        AND NOT _is_harness_error(r1.errmsg) AND NOT _is_harness_error(r2.errmsg)
+        AND (r1.raised OR r1.rows_affected = 0) AND (r2.raised OR r2.rows_affected = 0);
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','9. Transfer ownership',
      'both halves rejected; ownership unchanged; owner_admin count stays 1',
@@ -287,7 +322,7 @@ BEGIN
   ok := (SELECT count(*) FROM public.users WHERE role='owner_admin') = before_cnt;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','10. Create another owner_admin account',
-     'rejected; no new owner_admin created', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; no new owner_admin created', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- 11. Modify / override the hierarchy & security rules themselves -------
@@ -304,6 +339,8 @@ BEGIN
     $q$ CREATE OR REPLACE FUNCTION public.protect_owner_admin() RETURNS trigger
         LANGUAGE plpgsql AS 'BEGIN RETURN COALESCE(NEW, OLD); END;' $q$);  -- attempt to neuter
   ok := r1.raised AND r2.raised AND r3.raised AND r4.raised
+        AND NOT _is_harness_error(r1.errmsg) AND NOT _is_harness_error(r2.errmsg)
+        AND NOT _is_harness_error(r3.errmsg) AND NOT _is_harness_error(r4.errmsg)
         AND (SELECT relrowsecurity FROM pg_class WHERE oid='public.users'::regclass)        -- RLS still on
         AND EXISTS (SELECT 1 FROM pg_policies  WHERE tablename='users' AND policyname='users_ts_update')
         AND EXISTS (SELECT 1 FROM pg_trigger   WHERE tgname='trg_protect_owner_admin');
@@ -319,11 +356,11 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET role='owner_admin'
-        WHERE id=(SELECT id FROM _fix WHERE label='ts') $q$);
+        WHERE id='22222222-2222-2222-2222-222222222222'::uuid $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='ts')) = 'technology_specialist';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','BONUS. Self-escalate (TS → owner_admin)',
-     'rejected; TS stays technology_specialist', _mech(res.raised, res.errmsg, res.rows_affected), ok);
+     'rejected; TS stays technology_specialist', _mech(res.raised, res.errmsg, res.rows_affected), _forbidden_pass(ok, res.raised, res.errmsg, res.rows_affected));
 END $$;
 
 -- =====================================================================
@@ -336,13 +373,13 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ INSERT INTO public.users (id, email, full_name, role, is_active)
-        VALUES ((SELECT id FROM _fix WHERE label='subject'),
+        VALUES ('77777777-7777-7777-7777-777777777777'::uuid,
                 'subject@dchill.test', 'New Hire', 'staff', true) $q$);
   ok := NOT res.raised
         AND (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject')) = 'staff';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A1. Create a staff account', 'created with role staff',
-     CASE WHEN res.raised THEN 'unexpected error: '||left(res.errmsg,60) ELSE 'created ('||res.rows_affected||' row)' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error: '||left(res.errmsg,60) ELSE 'created ('||res.rows_affected||' row)' END, _allowed_pass(ok, res.raised, res.errmsg));
 END $$;
 
 -- A2. Promote staff -> inventory_staff -------------------------------
@@ -351,11 +388,11 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET role='inventory_staff'
-        WHERE id=(SELECT id FROM _fix WHERE label='subject') $q$);
+        WHERE id='77777777-7777-7777-7777-777777777777'::uuid $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject')) = 'inventory_staff';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A2. Promote staff -> inventory_staff', 'role is inventory_staff',
-     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, _allowed_pass(ok, res.raised, res.errmsg));
 END $$;
 
 -- A3. Promote inventory_staff -> manager -----------------------------
@@ -364,11 +401,11 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET role='manager'
-        WHERE id=(SELECT id FROM _fix WHERE label='subject') $q$);
+        WHERE id='77777777-7777-7777-7777-777777777777'::uuid $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject')) = 'manager';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A3. Promote inventory_staff -> manager', 'role is manager',
-     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, _allowed_pass(ok, res.raised, res.errmsg));
 END $$;
 
 -- A4. Assign another technology_specialist (still below owner_admin) ----
@@ -377,11 +414,11 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET role='technology_specialist'
-        WHERE id=(SELECT id FROM _fix WHERE label='subject') $q$);
+        WHERE id='77777777-7777-7777-7777-777777777777'::uuid $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject')) = 'technology_specialist';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A4. Assign technology_specialist role', 'role is technology_specialist',
-     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, _allowed_pass(ok, res.raised, res.errmsg));
 END $$;
 
 -- A5. Demote manager-level subject back down to staff ------------------
@@ -390,11 +427,11 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET role='staff'
-        WHERE id=(SELECT id FROM _fix WHERE label='subject') $q$);
+        WHERE id='77777777-7777-7777-7777-777777777777'::uuid $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject')) = 'staff';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A5. Demote a sub-owner account', 'role is staff',
-     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, _allowed_pass(ok, res.raised, res.errmsg));
 END $$;
 
 -- A6 + A7. Deactivate, then reactivate a staff account -----------------
@@ -403,19 +440,19 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET is_active=false
-        WHERE id=(SELECT id FROM _fix WHERE label='staff') $q$);
+        WHERE id='55555555-5555-5555-5555-555555555555'::uuid $q$);
   ok := (SELECT is_active FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='staff')) = false;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A6. Deactivate a staff account', 'is_active = false',
-     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, _allowed_pass(ok, res.raised, res.errmsg));
 
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET is_active=true
-        WHERE id=(SELECT id FROM _fix WHERE label='staff') $q$);
+        WHERE id='55555555-5555-5555-5555-555555555555'::uuid $q$);
   ok := (SELECT is_active FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='staff')) = true;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A7. Reactivate a staff account', 'is_active = true',
-     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, _allowed_pass(ok, res.raised, res.errmsg));
 END $$;
 
 -- A8. Edit a customer's email + phone ----------------------------------
@@ -424,11 +461,11 @@ DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
     $q$ UPDATE public.users SET email='updated-customer@dchill.test', phone='+15551230000'
-        WHERE id=(SELECT id FROM _fix WHERE label='customer') $q$);
+        WHERE id='66666666-6666-6666-6666-666666666666'::uuid $q$);
   ok := (SELECT email FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='customer')) = 'updated-customer@dchill.test';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A8. Edit a customer''s contact info', 'email/phone updated',
-     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, _allowed_pass(ok, res.raised, res.errmsg));
 END $$;
 
 -- A9. Delete a (non-owner) staff account -------------------------------
@@ -436,11 +473,11 @@ DO $$
 DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
-    $q$ DELETE FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject') $q$);
+    $q$ DELETE FROM public.users WHERE id='77777777-7777-7777-7777-777777777777'::uuid $q$);
   ok := NOT EXISTS (SELECT 1 FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject'));
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('ALLOWED','A9. Delete a sub-owner account', 'subject account removed',
-     CASE WHEN res.raised THEN 'unexpected error' ELSE 'deleted' END, ok);
+     CASE WHEN res.raised THEN 'unexpected error' ELSE 'deleted' END, _allowed_pass(ok, res.raised, res.errmsg));
 END $$;
 
 -- =====================================================================
@@ -481,5 +518,8 @@ END $$;
 -- Tidy up the helpers and undo every grant/fixture. Nothing persists.
 DROP FUNCTION IF EXISTS _as_ts(text);
 DROP FUNCTION IF EXISTS _mech(boolean, text, bigint);
+DROP FUNCTION IF EXISTS _forbidden_pass(boolean, boolean, text, bigint);
+DROP FUNCTION IF EXISTS _allowed_pass(boolean, boolean, text);
+DROP FUNCTION IF EXISTS _is_harness_error(text);
 
 ROLLBACK;
