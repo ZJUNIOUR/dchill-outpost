@@ -37,19 +37,25 @@ echo "==> (re)creating disposable test database: $TEST_DB"
 admin -c "DROP DATABASE IF EXISTS \"$TEST_DB\" WITH (FORCE);"
 admin -c "CREATE DATABASE \"$TEST_DB\";"
 
-echo "==> [1/5] Supabase test shim (roles + auth.uid)"
+echo "==> [1/7] Supabase test shim (roles + auth.uid)"
 run -f ci/supabase_test_shim.sql
 
-echo "==> [2/5] DATABASE_SCHEMA.sql"
+echo "==> [2/7] DATABASE_SCHEMA.sql"
 run -f DATABASE_SCHEMA.sql
 
-echo "==> [3/5] 0002_complete_rls_policies.sql"
+echo "==> [3/7] 0002_complete_rls_policies.sql"
 run -f 0002_complete_rls_policies.sql
 
-echo "==> [4/5] 0002_rls_verification.sql  (RLS coverage / secrets / append-only)"
+echo "==> [4/7] 0003_clover_inventory_mapping.sql"
+run -f supabase/migrations/0003_clover_inventory_mapping.sql
+
+echo "==> [5/7] 0002_rls_verification.sql  (RLS coverage / secrets / append-only)"
 run -f 0002_rls_verification.sql
 
-echo "==> [5/5] test_technology_specialist_rbac.sql  (Owner / Technology Specialist boundary)"
+echo "==> [6/7] 0003_rls_verification_clover.sql  (Clover mapping RLS)"
+run -f 0003_rls_verification_clover.sql
+
+echo "==> [7/7] test_technology_specialist_rbac.sql  (Owner / Technology Specialist boundary)"
 run -f test_technology_specialist_rbac.sql
 
 echo ""

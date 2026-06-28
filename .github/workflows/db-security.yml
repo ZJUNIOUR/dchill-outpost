@@ -7,9 +7,9 @@ name: DB Security Gate
 #   • Technology Specialist can affect Owner/Admin in any way
 #   • audit_logs becomes updateable/deleteable
 #   • payments.raw_event becomes readable by app roles
-# All of the above are asserted inside 0002_rls_verification.sql and
-# test_technology_specialist_rbac.sql, which RAISE on failure -> psql exits
-# non-zero (ON_ERROR_STOP) -> this job fails.
+# All of the above are asserted inside 0002_rls_verification.sql,
+# 0003_rls_verification_clover.sql, and test_technology_specialist_rbac.sql,
+# which RAISE on failure -> psql exits non-zero (ON_ERROR_STOP) -> this job fails.
 
 on:
   push:
@@ -17,6 +17,8 @@ on:
       - "DATABASE_SCHEMA.sql"
       - "0002_complete_rls_policies.sql"
       - "0002_rls_verification.sql"
+      - "0003_rls_verification_clover.sql"
+      - "supabase/migrations/**"
       - "test_technology_specialist_rbac.sql"
       - "ci/**"
       - "scripts/run_security_tests.sh"
@@ -26,6 +28,8 @@ on:
       - "DATABASE_SCHEMA.sql"
       - "0002_complete_rls_policies.sql"
       - "0002_rls_verification.sql"
+      - "0003_rls_verification_clover.sql"
+      - "supabase/migrations/**"
       - "test_technology_specialist_rbac.sql"
       - "ci/**"
       - "scripts/run_security_tests.sh"
