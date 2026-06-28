@@ -12,7 +12,7 @@
 --    5. Deactivate an owner_admin           11. Modify/override the rules
 --    6. Edit an owner's email                    themselves (RLS, trigger, etc.)
 --  ...and that it CAN still manage accounts BELOW owner_admin
---  (manager, inventory_manager, staff, customer, and other tech specialists).
+--  (manager, inventory_staff, staff, customer, and other tech specialists).
 --
 --  HOW TO RUN
 --  ----------
@@ -91,7 +91,7 @@ INSERT INTO public.users (id, email, phone, full_name, role, is_active) VALUES
   ((SELECT id FROM _fix WHERE label='owner'),    'owner@dchill.test',    '+15550000001', 'Owner Admin',  'owner_admin',          true),
   ((SELECT id FROM _fix WHERE label='ts'),       'ts@dchill.test',       '+15550000002', 'Tech Spec',    'technology_specialist',true),
   ((SELECT id FROM _fix WHERE label='manager'),  'manager@dchill.test',  '+15550000003', 'Store Manager','manager',              true),
-  ((SELECT id FROM _fix WHERE label='invmgr'),   'invmgr@dchill.test',   '+15550000004', 'Inv Manager',  'inventory_manager',    true),
+  ((SELECT id FROM _fix WHERE label='invmgr'),   'invmgr@dchill.test',   '+15550000004', 'Inv Manager',  'inventory_staff',    true),
   ((SELECT id FROM _fix WHERE label='staff'),    'staff@dchill.test',    '+15550000005', 'Staff Cashier','staff',                true),
   ((SELECT id FROM _fix WHERE label='customer'), 'customer@dchill.test', '+15550000006', 'A Customer',   'customer',             true);
 
@@ -147,12 +147,12 @@ BEGIN
      'rejected; manager unchanged; owner_admin count stays 1', _mech(res), ok);
 END $$;
 
--- 2. Remove owner_admin from the owner (set to inventory_manager) -------
+-- 2. Remove owner_admin from the owner (set to inventory_staff) -------
 DO $$
 DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
-    $q$ UPDATE public.users SET role='inventory_manager'
+    $q$ UPDATE public.users SET role='inventory_staff'
         WHERE id=(SELECT id FROM _fix WHERE label='owner') $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = 'owner_admin'
         AND (SELECT count(*) FROM public.users WHERE role='owner_admin') = 1;
@@ -340,20 +340,20 @@ BEGIN
      CASE WHEN res.raised THEN 'unexpected error: '||left(res.errmsg,60) ELSE 'created ('||res.rows_affected||' row)' END, ok);
 END $$;
 
--- A2. Promote staff -> inventory_manager -------------------------------
+-- A2. Promote staff -> inventory_staff -------------------------------
 DO $$
 DECLARE res record; ok boolean;
 BEGIN
   SELECT * INTO res FROM _as_ts(
-    $q$ UPDATE public.users SET role='inventory_manager'
+    $q$ UPDATE public.users SET role='inventory_staff'
         WHERE id=(SELECT id FROM _fix WHERE label='subject') $q$);
-  ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject')) = 'inventory_manager';
+  ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject')) = 'inventory_staff';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
-    ('ALLOWED','A2. Promote staff -> inventory_manager', 'role is inventory_manager',
+    ('ALLOWED','A2. Promote staff -> inventory_staff', 'role is inventory_staff',
      CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
 END $$;
 
--- A3. Promote inventory_manager -> manager -----------------------------
+-- A3. Promote inventory_staff -> manager -----------------------------
 DO $$
 DECLARE res record; ok boolean;
 BEGIN
@@ -362,7 +362,7 @@ BEGIN
         WHERE id=(SELECT id FROM _fix WHERE label='subject') $q$);
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='subject')) = 'manager';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
-    ('ALLOWED','A3. Promote inventory_manager -> manager', 'role is manager',
+    ('ALLOWED','A3. Promote inventory_staff -> manager', 'role is manager',
      CASE WHEN res.raised THEN 'unexpected error' ELSE 'updated' END, ok);
 END $$;
 
