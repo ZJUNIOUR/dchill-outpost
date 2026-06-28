@@ -121,13 +121,18 @@ BEGIN
   RETURN NEXT;
 END $$;
 
-CREATE OR REPLACE FUNCTION _mech(res record) RETURNS text LANGUAGE sql AS $$
-  SELECT CASE
-    WHEN res.raised             THEN 'blocked by exception: ' || left(coalesce(res.errmsg,''), 70)
-    WHEN res.rows_affected = 0  THEN 'blocked silently (RLS USING filtered the row; 0 rows)'
-    ELSE 'NOT BLOCKED — ' || res.rows_affected || ' row(s) affected'
+CREATE OR REPLACE FUNCTION _mech(
+  p_raised boolean,
+  p_errmsg text,
+  p_rows_affected bigint
+) RETURNS text LANGUAGE plpgsql AS $$
+BEGIN
+  RETURN CASE
+    WHEN p_raised             THEN 'blocked by exception: ' || left(coalesce(p_errmsg, ''), 70)
+    WHEN p_rows_affected = 0  THEN 'blocked silently (RLS USING filtered the row; 0 rows)'
+    ELSE 'NOT BLOCKED — ' || p_rows_affected || ' row(s) affected'
   END;
-$$;
+END $$;
 
 -- =====================================================================
 --  FORBIDDEN ACTIONS  (PASS == the action was rejected AND state intact)
@@ -144,7 +149,7 @@ BEGIN
         AND (SELECT count(*) FROM public.users WHERE role='owner_admin') = 1;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','1. Assign owner_admin to a manager',
-     'rejected; manager unchanged; owner_admin count stays 1', _mech(res), ok);
+     'rejected; manager unchanged; owner_admin count stays 1', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- 2. Remove owner_admin from the owner (set to inventory_staff) -------
@@ -158,7 +163,7 @@ BEGIN
         AND (SELECT count(*) FROM public.users WHERE role='owner_admin') = 1;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','2. Remove owner_admin role from the owner',
-     'rejected; owner still owner_admin', _mech(res), ok);
+     'rejected; owner still owner_admin', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- 3. Demote an owner_admin (set to manager) ----------------------------
@@ -171,7 +176,7 @@ BEGIN
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = 'owner_admin';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','3. Demote an owner_admin',
-     'rejected; owner still owner_admin', _mech(res), ok);
+     'rejected; owner still owner_admin', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- 4. Delete an owner_admin account -------------------------------------
@@ -184,7 +189,7 @@ BEGIN
         AND (SELECT count(*) FROM public.users WHERE role='owner_admin') = 1;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','4. Delete an owner_admin account',
-     'rejected; owner row still present', _mech(res), ok);
+     'rejected; owner row still present', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- 5. Deactivate an owner_admin account ---------------------------------
@@ -197,7 +202,7 @@ BEGIN
   ok := (SELECT is_active FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = true;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','5. Deactivate an owner_admin account',
-     'rejected; owner still active', _mech(res), ok);
+     'rejected; owner still active', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- 6. Edit an owner_admin's email ---------------------------------------
@@ -211,7 +216,7 @@ BEGIN
   ok := (SELECT email FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = orig;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','6. Edit an owner_admin''s email',
-     'rejected; owner email unchanged', _mech(res), ok);
+     'rejected; owner email unchanged', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- 7. Edit an owner_admin's phone ---------------------------------------
@@ -225,7 +230,7 @@ BEGIN
   ok := (SELECT phone FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='owner')) = orig;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','7. Edit an owner_admin''s phone',
-     'rejected; owner phone unchanged', _mech(res), ok);
+     'rejected; owner phone unchanged', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- 8. Edit an owner_admin's login credentials ---------------------------
@@ -243,7 +248,7 @@ BEGIN
     ok := res.raised OR res.rows_affected = 0;
     INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
       ('FORBIDDEN','8. Edit an owner_admin''s login credentials (auth.users)',
-       'rejected; no auth.users row changed', _mech(res), ok);
+       'rejected; no auth.users row changed', _mech(res.raised, res.errmsg, res.rows_affected), ok);
   ELSE
     INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
       ('FORBIDDEN','8. Edit an owner_admin''s login credentials (auth.users)',
@@ -268,7 +273,7 @@ BEGIN
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','9. Transfer ownership',
      'both halves rejected; ownership unchanged; owner_admin count stays 1',
-     'promote: '||_mech(r1)||' | demote: '||_mech(r2), ok);
+     'promote: '||_mech(r1.raised, r1.errmsg, r1.rows_affected)||' | demote: '||_mech(r2.raised, r2.errmsg, r2.rows_affected), ok);
 END $$;
 
 -- 10. Create another owner_admin account -------------------------------
@@ -282,7 +287,7 @@ BEGIN
   ok := (SELECT count(*) FROM public.users WHERE role='owner_admin') = before_cnt;
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','10. Create another owner_admin account',
-     'rejected; no new owner_admin created', _mech(res), ok);
+     'rejected; no new owner_admin created', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- 11. Modify / override the hierarchy & security rules themselves -------
@@ -318,7 +323,7 @@ BEGIN
   ok := (SELECT role FROM public.users WHERE id=(SELECT id FROM _fix WHERE label='ts')) = 'technology_specialist';
   INSERT INTO _tests(category,restriction,expectation,mechanism,passed) VALUES
     ('FORBIDDEN','BONUS. Self-escalate (TS → owner_admin)',
-     'rejected; TS stays technology_specialist', _mech(res), ok);
+     'rejected; TS stays technology_specialist', _mech(res.raised, res.errmsg, res.rows_affected), ok);
 END $$;
 
 -- =====================================================================
@@ -475,6 +480,6 @@ END $$;
 
 -- Tidy up the helpers and undo every grant/fixture. Nothing persists.
 DROP FUNCTION IF EXISTS _as_ts(text);
-DROP FUNCTION IF EXISTS _mech(record);
+DROP FUNCTION IF EXISTS _mech(boolean, text, bigint);
 
 ROLLBACK;
