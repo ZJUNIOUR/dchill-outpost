@@ -186,6 +186,7 @@ export function ProductBarcodeManager({
                 <tr>
                   <th style={styles.th}>Barcode</th>
                   <th style={styles.th}>Primary</th>
+                  <th style={styles.th}>Clover code ID</th>
                   {canManageBarcodes && <th style={styles.th}>Actions</th>}
                 </tr>
               </thead>
@@ -213,6 +214,7 @@ export function ProductBarcodeManager({
                             Primary
                           </label>
                         </td>
+                        <td style={styles.td}>{row.clover_alternate_code_id ?? '—'}</td>
                         <td style={styles.td}>
                           <button
                             type="button"
@@ -236,6 +238,9 @@ export function ProductBarcodeManager({
                       <>
                         <td style={styles.td}>{row.barcode}</td>
                         <td style={styles.td}>{row.is_primary ? 'Yes' : 'No'}</td>
+                        <td style={styles.td}>
+                          {row.clover_alternate_code_id ?? '—'}
+                        </td>
                         {canManageBarcodes && (
                           <td style={styles.td}>
                             <button

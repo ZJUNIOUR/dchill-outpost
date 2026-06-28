@@ -5,6 +5,7 @@ import type { Category, InventoryLogWithProduct, InventoryRecordWithProduct, Pro
 
 import { usePermissions } from '../auth/usePermissions.js';
 import { CategoryManager } from '../components/inventory/CategoryManager.js';
+import { CloverSyncBanner } from '../components/inventory/CloverSyncBanner.js';
 import { InventoryAdjustmentForm } from '../components/inventory/InventoryAdjustmentForm.js';
 import { InventoryLogTable } from '../components/inventory/InventoryLogTable.js';
 import { ProductBarcodeManager } from '../components/inventory/ProductBarcodeManager.js';
@@ -198,7 +199,7 @@ export function InventoryPage(): JSX.Element {
         <div>
           <h1 style={styles.h1}>Inventory</h1>
           <p style={styles.note}>
-            Phase 2A–2C. UI permission hints below are not security — RLS in Postgres enforces
+            Phase 2E-types. UI permission hints below are not security — RLS in Postgres enforces
             every read and write.
           </p>
         </div>
@@ -210,6 +211,8 @@ export function InventoryPage(): JSX.Element {
       {permissionsError && <p style={styles.error}>{permissionsError}</p>}
       {pageError && <p style={styles.error}>{pageError}</p>}
       {actionError && <p style={styles.error}>{actionError}</p>}
+
+      <CloverSyncBanner />
 
       {permissionsLoading || loading ? (
         <p>Loading…</p>

@@ -99,6 +99,55 @@ export type ProductStatus =
   | 'hidden'
   | 'admin_only';
 
+/**
+ * `system_settings.clover_sync_mode` — legacy + canonical values (migration 0003).
+ */
+export type CloverSyncMode =
+  | 'payments_only'
+  | 'catalog_oneway'
+  | 'full'
+  | 'local_dev'
+  | 'clover_readonly'
+  | 'clover_primary';
+
+/**
+ * Clover mirror sync status on products, categories, and inventory rows.
+ */
+export type CloverSyncStatus =
+  | 'local_only'
+  | 'synced'
+  | 'pending'
+  | 'error'
+  | 'conflict';
+
+/** Maps legacy `clover_sync_mode` values to canonical modes (mirrors `effective_clover_sync_mode()`). */
+export function effectiveCloverSyncMode(mode: CloverSyncMode): CloverSyncMode {
+  if (mode === 'catalog_oneway') {
+    return 'clover_readonly';
+  }
+  if (mode === 'full') {
+    return 'clover_primary';
+  }
+  return mode;
+}
+
+/** Row shape from `public.clover_sync_runs` (staff read-only via RLS). */
+export type CloverSyncRunType = 'catalog' | 'inventory' | 'webhook' | 'full';
+export type CloverSyncRunStatus = 'running' | 'succeeded' | 'failed' | 'partial';
+
+export interface CloverSyncRun {
+  id: string;
+  run_type: CloverSyncRunType;
+  status: CloverSyncRunStatus;
+  merchant_id: string | null;
+  started_at: string;
+  finished_at: string | null;
+  records_upserted: number;
+  records_failed: number;
+  error_summary: string | null;
+  triggered_by: string;
+}
+
 /** Row shape from `public.categories`. */
 export interface Category {
   id: string;
@@ -107,6 +156,10 @@ export interface Category {
   parent_id: string | null;
   sort_order: number;
   is_active: boolean;
+  clover_category_id: string | null;
+  clover_sync_status: CloverSyncStatus;
+  last_synced_at: string | null;
+  clover_modified_at: string | null;
 }
 
 /** Row shape from `public.products` (prices as strings — matches numeric(10,2) without float drift). */
@@ -127,8 +180,9 @@ export interface Product {
   substitution_allowed: boolean;
   status: ProductStatus;
   clover_item_id: string | null;
-  clover_sync_status: string;
+  clover_sync_status: CloverSyncStatus;
   last_synced_at: string | null;
+  clover_modified_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -139,6 +193,7 @@ export interface ProductBarcode {
   product_id: string;
   barcode: string;
   is_primary: boolean;
+  clover_alternate_code_id: string | null;
 }
 
 /** Product with nested barcode rows (admin joins). */
@@ -152,7 +207,7 @@ export interface InventoryRecord {
   quantity_on_hand: number;
   quantity_reserved: number;
   low_stock_threshold: number;
-  clover_sync_status: string;
+  clover_sync_status: CloverSyncStatus;
   last_synced_at: string | null;
   updated_at: string;
 }
@@ -177,6 +232,13 @@ export type InventoryLogReason =
   | 'manual'
   | 'restock';
 
+/** Documented values for `inventory_logs.source` (migration 0003). */
+export type InventoryLogSource =
+  | 'app'
+  | 'clover_sync'
+  | 'edge_function'
+  | 'order_flow';
+
 /** Row shape from `public.inventory_logs`. */
 export interface InventoryLog {
   id: string;
@@ -186,6 +248,8 @@ export interface InventoryLog {
   reason: string;
   user_id: string | null;
   order_id: string | null;
+  source: InventoryLogSource;
+  external_ref: string | null;
   created_at: string;
 }
 

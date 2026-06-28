@@ -74,6 +74,8 @@ export function InventoryLogTable({
                 <th style={styles.th}>Change</th>
                 <th style={styles.th}>New qty</th>
                 <th style={styles.th}>Reason</th>
+                <th style={styles.th}>Source</th>
+                <th style={styles.th}>External ref</th>
                 <th style={styles.th}>Actor</th>
               </tr>
             </thead>
@@ -85,6 +87,8 @@ export function InventoryLogTable({
                   <td style={styles.td}>{formatChangeQty(row.change_qty)}</td>
                   <td style={styles.td}>{row.new_quantity}</td>
                   <td style={styles.td}>{row.reason}</td>
+                  <td style={styles.td}>{row.source}</td>
+                  <td style={styles.td}>{row.external_ref ?? '—'}</td>
                   <td style={styles.td}>
                     {row.actor?.full_name ?? row.actor?.email ?? row.user_id ?? '—'}
                   </td>

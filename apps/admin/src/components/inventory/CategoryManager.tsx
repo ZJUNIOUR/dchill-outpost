@@ -9,6 +9,7 @@ import {
   type CreateCategoryInput,
   type UpdateCategoryInput,
 } from '../../inventory/index.js';
+import { formatCategoryCloverLabel } from './cloverDisplay.js';
 
 type FormMode = 'closed' | 'create' | 'edit';
 
@@ -157,6 +158,7 @@ export function CategoryManager({
               <th style={styles.th}>Slug</th>
               <th style={styles.th}>Sort</th>
               <th style={styles.th}>Active</th>
+              <th style={styles.th}>Clover</th>
               {canWrite && <th style={styles.th}>Actions</th>}
             </tr>
           </thead>
@@ -167,6 +169,14 @@ export function CategoryManager({
                 <td style={styles.td}>{category.slug}</td>
                 <td style={styles.td}>{category.sort_order}</td>
                 <td style={styles.td}>{category.is_active ? 'Yes' : 'No'}</td>
+                <td style={styles.td}>
+                  <span
+                    style={styles.cloverLabel}
+                    title={category.clover_category_id ? 'Clover category ID' : 'Sync status'}
+                  >
+                    {formatCategoryCloverLabel(category)}
+                  </span>
+                </td>
                 {canWrite && (
                   <td style={styles.td}>
                     <button
@@ -285,4 +295,5 @@ const styles: Record<string, CSSProperties> = {
   error: { color: '#b00020', margin: 0 },
   warn: { color: '#8a5a00', fontSize: '0.9rem' },
   muted: { color: '#666' },
+  cloverLabel: { fontSize: '0.85rem', color: '#444', fontFamily: 'ui-monospace, monospace' },
 };

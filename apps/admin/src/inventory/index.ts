@@ -1,8 +1,11 @@
 import type {
   AuthResult,
   Category,
+  CloverSyncMode,
+  CloverSyncStatus,
   InventoryLog,
   InventoryLogReason,
+  InventoryLogSource,
   InventoryLogWithProduct,
   InventoryRecord,
   InventoryRecordWithProduct,
@@ -32,6 +35,44 @@ const PRODUCT_STATUSES: ReadonlySet<string> = new Set([
   'admin_only',
 ]);
 
+const CLOVER_SYNC_STATUSES: ReadonlySet<string> = new Set([
+  'local_only',
+  'synced',
+  'pending',
+  'error',
+  'conflict',
+]);
+
+const CLOVER_SYNC_MODES: ReadonlySet<string> = new Set([
+  'payments_only',
+  'catalog_oneway',
+  'full',
+  'local_dev',
+  'clover_readonly',
+  'clover_primary',
+]);
+
+const INVENTORY_LOG_SOURCES: ReadonlySet<string> = new Set([
+  'app',
+  'clover_sync',
+  'edge_function',
+  'order_flow',
+]);
+
+const PRODUCT_SELECT =
+  'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, clover_modified_at, created_at, updated_at';
+
+const CATEGORY_SELECT =
+  'id, name, slug, parent_id, sort_order, is_active, clover_category_id, clover_sync_status, last_synced_at, clover_modified_at';
+
+const PRODUCT_BARCODE_SELECT =
+  'id, product_id, barcode, is_primary, clover_alternate_code_id';
+
+const INVENTORY_LOG_ROW_SELECT =
+  'id, product_id, change_qty, new_quantity, reason, user_id, order_id, source, external_ref, created_at';
+
+const PRODUCT_WITH_CATEGORY_SELECT = `${PRODUCT_SELECT}, categories ( id, name, slug )`;
+
 /** Documented manual-adjustment reasons (maps to `inventory_logs.reason` TEXT). */
 export const INVENTORY_LOG_REASONS: readonly InventoryLogReason[] = [
   'manual',
@@ -52,6 +93,21 @@ function formatDbError(error: PostgrestError): string {
     return 'Permission denied — RLS blocked this action. Your role may not have the required permission.';
   }
   return error.message;
+}
+
+function parseCloverSyncStatus(value: unknown): CloverSyncStatus {
+  const raw = String(value ?? 'local_only');
+  return CLOVER_SYNC_STATUSES.has(raw) ? (raw as CloverSyncStatus) : 'local_only';
+}
+
+function parseCloverSyncMode(value: unknown): CloverSyncMode {
+  const raw = String(value ?? 'payments_only');
+  return CLOVER_SYNC_MODES.has(raw) ? (raw as CloverSyncMode) : 'payments_only';
+}
+
+function parseInventoryLogSource(value: unknown): InventoryLogSource {
+  const raw = String(value ?? 'app');
+  return INVENTORY_LOG_SOURCES.has(raw) ? (raw as InventoryLogSource) : 'app';
 }
 
 function parseProductStatus(value: string): ProductStatus | null {
@@ -88,8 +144,9 @@ function mapProduct(row: Record<string, unknown>): Product | null {
     substitution_allowed: Boolean(row.substitution_allowed),
     status,
     clover_item_id: row.clover_item_id ? String(row.clover_item_id) : null,
-    clover_sync_status: String(row.clover_sync_status ?? 'local_only'),
+    clover_sync_status: parseCloverSyncStatus(row.clover_sync_status),
     last_synced_at: row.last_synced_at ? String(row.last_synced_at) : null,
+    clover_modified_at: row.clover_modified_at ? String(row.clover_modified_at) : null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   };
@@ -103,6 +160,10 @@ function mapCategory(row: Record<string, unknown>): Category {
     parent_id: row.parent_id ? String(row.parent_id) : null,
     sort_order: Number(row.sort_order),
     is_active: Boolean(row.is_active),
+    clover_category_id: row.clover_category_id ? String(row.clover_category_id) : null,
+    clover_sync_status: parseCloverSyncStatus(row.clover_sync_status),
+    last_synced_at: row.last_synced_at ? String(row.last_synced_at) : null,
+    clover_modified_at: row.clover_modified_at ? String(row.clover_modified_at) : null,
   };
 }
 
@@ -112,7 +173,7 @@ function mapInventory(row: Record<string, unknown>): InventoryRecord {
     quantity_on_hand: Number(row.quantity_on_hand),
     quantity_reserved: Number(row.quantity_reserved),
     low_stock_threshold: Number(row.low_stock_threshold),
-    clover_sync_status: String(row.clover_sync_status ?? 'local_only'),
+    clover_sync_status: parseCloverSyncStatus(row.clover_sync_status),
     last_synced_at: row.last_synced_at ? String(row.last_synced_at) : null,
     updated_at: String(row.updated_at),
   };
@@ -124,6 +185,9 @@ function mapProductBarcode(row: Record<string, unknown>): ProductBarcode {
     product_id: String(row.product_id),
     barcode: String(row.barcode),
     is_primary: Boolean(row.is_primary),
+    clover_alternate_code_id: row.clover_alternate_code_id
+      ? String(row.clover_alternate_code_id)
+      : null,
   };
 }
 
@@ -144,6 +208,8 @@ function mapInventoryLog(row: Record<string, unknown>): InventoryLog {
     reason: String(row.reason),
     user_id: row.user_id ? String(row.user_id) : null,
     order_id: row.order_id ? String(row.order_id) : null,
+    source: parseInventoryLogSource(row.source),
+    external_ref: row.external_ref ? String(row.external_ref) : null,
     created_at: String(row.created_at),
   };
 }
@@ -185,7 +251,7 @@ function formatLogReason(reason: InventoryLogReason, note?: string): string {
 }
 
 const INVENTORY_LOG_SELECT =
-  'id, product_id, change_qty, new_quantity, reason, user_id, order_id, created_at, products ( id, name, sku ), users ( id, full_name, email )';
+  'id, product_id, change_qty, new_quantity, reason, user_id, order_id, source, external_ref, created_at, products ( id, name, sku ), users ( id, full_name, email )';
 
 function mapProductWithCategory(row: Record<string, unknown>): ProductWithCategory | null {
   const product = mapProduct(row);
@@ -238,9 +304,7 @@ export interface UpdateProductInput {
 export async function listProducts(): Promise<AuthResult<ProductWithCategory[]>> {
   const { data, error } = await supabase
     .from('products')
-    .select(
-      'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, created_at, updated_at, categories ( id, name, slug )',
-    )
+    .select(PRODUCT_WITH_CATEGORY_SELECT)
     .order('name', { ascending: true });
 
   if (error) {
@@ -258,7 +322,7 @@ export async function listProducts(): Promise<AuthResult<ProductWithCategory[]>>
 export async function listCategories(): Promise<AuthResult<Category[]>> {
   const { data, error } = await supabase
     .from('categories')
-    .select('id, name, slug, parent_id, sort_order, is_active')
+    .select(CATEGORY_SELECT)
     .order('sort_order', { ascending: true })
     .order('name', { ascending: true });
 
@@ -276,9 +340,7 @@ export async function listCategories(): Promise<AuthResult<Category[]>> {
 export async function getProductById(productId: string): Promise<AuthResult<ProductWithCategory>> {
   const { data, error } = await supabase
     .from('products')
-    .select(
-      'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, created_at, updated_at, categories ( id, name, slug )',
-    )
+    .select(PRODUCT_WITH_CATEGORY_SELECT)
     .eq('id', productId)
     .maybeSingle();
 
@@ -313,9 +375,7 @@ export async function createProduct(input: CreateProductInput): Promise<AuthResu
       sale_price: input.sale_price ?? null,
       status: input.status ?? 'in_stock',
     })
-    .select(
-      'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, created_at, updated_at',
-    )
+    .select(PRODUCT_SELECT)
     .single();
 
   if (error) {
@@ -351,9 +411,7 @@ export async function updateProduct(
     .from('products')
     .update(patch)
     .eq('id', productId)
-    .select(
-      'id, name, slug, category_id, brand, sku, description, size_unit, image_url, base_price, sale_price, is_taxable, is_featured, substitution_allowed, status, clover_item_id, clover_sync_status, last_synced_at, created_at, updated_at',
-    )
+    .select(PRODUCT_SELECT)
     .single();
 
   if (error) {
@@ -520,7 +578,7 @@ export async function createInventoryLog(
       user_id: userId,
       order_id: input.order_id ?? null,
     })
-    .select('id, product_id, change_qty, new_quantity, reason, user_id, order_id, created_at')
+    .select(INVENTORY_LOG_ROW_SELECT)
     .single();
 
   if (error) {
@@ -628,7 +686,7 @@ export async function createCategory(input: CreateCategoryInput): Promise<AuthRe
       sort_order: input.sort_order ?? 0,
       is_active: input.is_active ?? true,
     })
-    .select('id, name, slug, parent_id, sort_order, is_active')
+    .select(CATEGORY_SELECT)
     .single();
 
   if (error) {
@@ -654,7 +712,7 @@ export async function updateCategory(
     .from('categories')
     .update(patch)
     .eq('id', categoryId)
-    .select('id, name, slug, parent_id, sort_order, is_active')
+    .select(CATEGORY_SELECT)
     .single();
 
   if (error) {
@@ -676,7 +734,7 @@ export async function setCategoryActive(
 export async function listProductBarcodes(productId: string): Promise<AuthResult<ProductBarcode[]>> {
   const { data, error } = await supabase
     .from('product_barcodes')
-    .select('id, product_id, barcode, is_primary')
+    .select(PRODUCT_BARCODE_SELECT)
     .eq('product_id', productId)
     .order('is_primary', { ascending: false })
     .order('barcode', { ascending: true });
@@ -712,7 +770,7 @@ export async function addProductBarcode(
       barcode: trimmed,
       is_primary: isPrimary,
     })
-    .select('id, product_id, barcode, is_primary')
+    .select(PRODUCT_BARCODE_SELECT)
     .single();
 
   if (error) {
@@ -746,7 +804,7 @@ export async function updateProductBarcode(
     .from('product_barcodes')
     .update(patch)
     .eq('id', barcodeId)
-    .select('id, product_id, barcode, is_primary')
+    .select(PRODUCT_BARCODE_SELECT)
     .single();
 
   if (error) {
@@ -765,6 +823,36 @@ export async function deleteProductBarcode(barcodeId: string): Promise<AuthResul
   }
 
   return { data: null, error: null };
+}
+
+/** Read-only Clover sync mode from `system_settings` (staff+ via RLS). No secrets. */
+export interface CloverSyncSettings {
+  clover_sync_mode: CloverSyncMode;
+  clover_merchant_id: string | null;
+}
+
+export async function getCloverSyncSettings(): Promise<AuthResult<CloverSyncSettings>> {
+  const { data, error } = await supabase
+    .from('system_settings')
+    .select('clover_sync_mode, clover_merchant_id')
+    .eq('id', true)
+    .maybeSingle();
+
+  if (error) {
+    return { data: null, error: formatDbError(error) };
+  }
+  if (!data) {
+    return { data: null, error: 'System settings not found.' };
+  }
+
+  const row = data as Record<string, unknown>;
+  return {
+    data: {
+      clover_sync_mode: parseCloverSyncMode(row.clover_sync_mode),
+      clover_merchant_id: row.clover_merchant_id ? String(row.clover_merchant_id) : null,
+    },
+    error: null,
+  };
 }
 
 export { slugify };

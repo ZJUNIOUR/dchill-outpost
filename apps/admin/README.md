@@ -82,6 +82,28 @@ Inventory history visibility and stock adjustments that write `inventory_logs` r
 
 **What it does not do yet:** Clover sync/write-through, camera/scanner UI, customer catalog, images, orders, notifications, reports.
 
+### Phase 2E-types — Clover mapping types & read-only display
+
+Migration `0003_clover_inventory_mapping.sql` added Clover mirror fields. This phase wires TypeScript types and **read-only** admin display — no write behavior changes.
+
+**Read-only Clover mapping fields** (from Supabase mirror; Clover is source of truth):
+
+| Table | Fields shown in admin |
+|-------|------------------------|
+| `products` | `clover_item_id`, `clover_sync_status`, `last_synced_at`, `clover_modified_at` |
+| `categories` | `clover_category_id`, `clover_sync_status`, `last_synced_at`, `clover_modified_at` |
+| `product_barcodes` | `clover_alternate_code_id` |
+| `inventory_logs` | `source`, `external_ref` |
+| `system_settings` | `clover_sync_mode`, `clover_merchant_id` (banner only; non-secret) |
+
+**Sync status display:** Products and categories show Clover ID when linked; otherwise the sync status label (`local_only`, `synced`, `pending`, `error`, `conflict`). The inventory page banner reads `system_settings.clover_sync_mode` and shows the effective canonical mode when legacy values are set (`catalog_oneway` → `clover_readonly`, `full` → `clover_primary`).
+
+**Clover API integration** starts in **Phase 2F** (Edge Functions). Until then, all catalog/stock writes remain direct Supabase (Phase 2A–2C temporary path).
+
+**RLS is authoritative.** Sync fields are readable only where Postgres policies allow (staff+ for settings and sync runs). Webhook payloads and Clover credentials are never exposed to this app.
+
+**What it does not do yet:** Clover sync Edge Functions, write-through guards, customer catalog, mobile scanner.
+
 ## Environment variables
 
 Copy `apps/admin/.env.example` → `apps/admin/.env` and set:
