@@ -1,0 +1,27 @@
+# Environment and secrets — never commit
+.env
+.env.*
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+
+# Expo (mobile)
+.expo/
+
+# Hosting deploy artifacts
+.vercel/
+.netlify/
+
+# Supabase local CLI state
+supabase/.branches/
+supabase/.temp/
+
+# Test coverage and logs
+coverage/
+logs
+*.log
+
+# TypeScript build output (packages)
+packages/*/dist/

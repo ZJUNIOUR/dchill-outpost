@@ -1,0 +1,7 @@
+{
+  "name": "@dchill/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared utilities for DChill Outpost apps. Scaffold only — no features yet."
+}

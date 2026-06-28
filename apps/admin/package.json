@@ -1,0 +1,6 @@
+{
+  "name": "@dchill/admin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "DChill Outpost admin dashboard (React + Vite). Scaffold only — no features yet."
+}

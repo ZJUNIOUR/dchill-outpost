@@ -1,0 +1,79 @@
+name: DB Security Gate
+
+# Fails the build if the database security posture regresses:
+#   • any PASS/FAIL assertion in the suites fails
+#   • any sensitive table is missing RLS
+#   • clover_credentials becomes readable by any app role
+#   • Technology Specialist can affect Owner/Admin in any way
+#   • audit_logs becomes updateable/deleteable
+#   • payments.raw_event becomes readable by app roles
+# All of the above are asserted inside 0002_rls_verification.sql and
+# test_technology_specialist_rbac.sql, which RAISE on failure -> psql exits
+# non-zero (ON_ERROR_STOP) -> this job fails.
+
+on:
+  push:
+    paths:
+      - "DATABASE_SCHEMA.sql"
+      - "0002_complete_rls_policies.sql"
+      - "0002_rls_verification.sql"
+      - "test_technology_specialist_rbac.sql"
+      - "ci/**"
+      - "scripts/run_security_tests.sh"
+      - ".github/workflows/db-security.yml"
+  pull_request:
+    paths:
+      - "DATABASE_SCHEMA.sql"
+      - "0002_complete_rls_policies.sql"
+      - "0002_rls_verification.sql"
+      - "test_technology_specialist_rbac.sql"
+      - "ci/**"
+      - "scripts/run_security_tests.sh"
+      - ".github/workflows/db-security.yml"
+  workflow_dispatch: {}
+
+jobs:
+  rls-security:
+    name: RLS coverage + Owner/TS protection
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client (psql)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time" >&2
+          exit 1
+
+      - name: Run security test suite (RLS + Owner protection)
+        run: bash scripts/run_security_tests.sh
