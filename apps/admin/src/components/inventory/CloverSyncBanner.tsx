@@ -72,7 +72,8 @@ export function CloverSyncBanner(): JSX.Element {
         Phase 2A–2C catalog and stock writes on this page go <strong>directly to Supabase</strong>{' '}
         — temporary local-dev behavior only. Production inventory and catalog mutations will go
         through Edge Functions to <strong>Clover first</strong>, then mirror to Supabase (Phase
-        2F–2G). Clover API integration has not started yet.
+        2G). Server-side read sync functions exist — see{' '}
+        <code>docs/CLOVER_SANDBOX_SYNC_TESTING.md</code>.
       </p>
     </aside>
   );

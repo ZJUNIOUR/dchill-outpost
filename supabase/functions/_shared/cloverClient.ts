@@ -45,7 +45,7 @@ export interface CloverCategory {
 
 /**
  * Narrow optional Clover item shape.
- * TODO(Phase 2F): confirm `code` vs `alternateCodes` mapping with sandbox item payloads.
+ * TODO(Phase 2F.5): confirm `code` vs `alternateCodes` with sandbox payloads — see docs/CLOVER_SANDBOX_SYNC_TESTING.md §8.
  */
 export interface CloverItem {
   id?: string;
@@ -155,6 +155,7 @@ export async function listCloverCategories(config: CloverConfig): Promise<Clover
 
 export async function listCloverItems(config: CloverConfig): Promise<CloverItem[]> {
   // Item catalog only — stock quantities synced separately via listCloverItemStocks.
+  // TODO(Phase 2F.5): sandbox may require expand=categories,alternateCodes on GET /items — see docs/CLOVER_SANDBOX_SYNC_TESTING.md §8.
   return cloverGetAllPages<CloverItem>(config, '/items');
 }
 

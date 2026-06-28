@@ -57,6 +57,7 @@ export function mapCloverProductRow(
   const categoryId = cloverCategoryId ? categoryIdByClover.get(cloverCategoryId) ?? null : null;
   const baseSlug = slugify(item.name) || `product-${item.id}`;
 
+  // TODO(Phase 2F.5): conflict detection not implemented — mirror overwrites; compare clover_modified_at in Phase 2G.
   return {
     clover_item_id: item.id,
     name: item.name,
@@ -81,7 +82,7 @@ export interface BarcodeMapping {
 
 /**
  * Extract barcode strings from a Clover item.
- * TODO(Phase 2F): validate whether `code` is always UPC/EAN vs internal SKU on sandbox data.
+ * TODO(Phase 2F.5): validate whether `code` is UPC/EAN vs internal SKU — see docs/CLOVER_SANDBOX_SYNC_TESTING.md §8.
  */
 export function extractBarcodeMappings(item: CloverItem): BarcodeMapping[] {
   const rows: BarcodeMapping[] = [];

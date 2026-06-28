@@ -115,4 +115,4 @@ Staff can read `clover_sync_runs` via RLS; webhook payloads remain service-role 
 - Owner / Technology Specialist rules unchanged — functions do not manage users.
 - RLS remains authoritative for client reads; mirror writes use service role inside functions.
 
-See `AGENTS.md`, `docs/MEMORY.md` §6a, and `docs/TECHNICAL_ARCHITECTURE.md`.
+See `AGENTS.md`, `docs/MEMORY.md` §6a, `docs/TECHNICAL_ARCHITECTURE.md`, and **`docs/CLOVER_SANDBOX_SYNC_TESTING.md`** (Phase 2F.5 sandbox checklist).
