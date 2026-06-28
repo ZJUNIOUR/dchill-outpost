@@ -98,11 +98,27 @@ Migration `0003_clover_inventory_mapping.sql` added Clover mirror fields. This p
 
 **Sync status display:** Products and categories show Clover ID when linked; otherwise the sync status label (`local_only`, `synced`, `pending`, `error`, `conflict`). The inventory page banner reads `system_settings.clover_sync_mode` and shows the effective canonical mode when legacy values are set (`catalog_oneway` → `clover_readonly`, `full` → `clover_primary`).
 
-**Clover API integration** starts in **Phase 2F** (Edge Functions). Until then, all catalog/stock writes remain direct Supabase (Phase 2A–2C temporary path).
+**Clover API integration** is scaffolded in **Phase 2F** (read-only Edge Functions). Admin UI still displays mirror fields only; production write-through is Phase 2G.
 
 **RLS is authoritative.** Sync fields are readable only where Postgres policies allow (staff+ for settings and sync runs). Webhook payloads and Clover credentials are never exposed to this app.
 
-**What it does not do yet:** Clover sync Edge Functions, write-through guards, customer catalog, mobile scanner.
+**What it does not do yet:** Clover write-through admin mutations, write guards, customer catalog, mobile scanner.
+
+### Phase 2F — Server-side read-only Clover sync
+
+Edge Functions under `supabase/functions/` (Deno, service-role only):
+
+| Function | Purpose |
+|----------|---------|
+| `clover-sync-catalog` | GET Clover categories/items → upsert Supabase mirror + barcodes |
+| `clover-sync-inventory` | GET Clover `item_stocks` → update `inventory` + `inventory_logs` (`source=clover_sync`) |
+
+- **Admin UI still does not call Clover.** It only displays mirror sync fields (`CloverSyncBanner`, product/category tables).
+- Staff may trigger sync by POSTing to Edge Functions with a JWT; functions re-check role/permissions server-side.
+- Clover access tokens and service-role keys live in **Supabase Edge Function secrets only** — not in this app’s `.env`.
+- Phase 2F is **read-only** toward Clover (GET endpoints only). Write-through admin edits arrive in Phase 2G.
+
+See `supabase/functions/README.md` for required secrets and sandbox validation notes.
 
 ## Environment variables
 

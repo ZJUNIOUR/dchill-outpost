@@ -7,7 +7,7 @@ Backend layout for DChill Outpost: migrations, Edge Functions, seed data, and te
 | Path | Purpose |
 |------|---------|
 | `migrations/` | Forward-only SQL migrations (`NNNN_description.sql`) for the Supabase project |
-| `functions/` | Deno Edge Functions (Clover checkout, webhooks, notifications, owner-checked credential changes) |
+| `functions/` | Deno Edge Functions — see [`functions/README.md`](functions/README.md) (Clover read-only sync, checkout, webhooks) |
 | `seed/` | Non-production seed scripts (never auto-create a second `owner_admin`) |
 | `tests/` | Supabase-local or integration test helpers |
 
