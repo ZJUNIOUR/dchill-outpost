@@ -2,7 +2,7 @@
 --  DChill Outpost — DATABASE_SCHEMA.sql
 --  PostgreSQL / Supabase. Pickup-only MVP. Owner-protected RBAC.
 --
---  Apply order: extensions -> enums -> helper -> tables -> indexes ->
+--  Apply order: extensions -> enums -> tables -> helper -> indexes ->
 --  RLS + Owner-protection -> seed data. Idempotent where practical.
 --
 --  SECURITY ANCHORS (do not rename/remove without owner sign-off):
@@ -53,18 +53,6 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE notif_status AS ENUM ('queued','sent','failed');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- ---------------------------------------------------------------------
--- HELPER: caller's app role, bypassing RLS to avoid recursion in users
--- policies. SECURITY DEFINER + locked search_path (Supabase-safe pattern).
--- ---------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION auth_user_role()
-RETURNS user_role
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT role FROM public.users WHERE id = auth.uid();
-$$;
-
 -- =====================================================================
 -- USERS / PROFILES
 -- On Supabase, users.id maps to auth.users.id. Credentials (password,
@@ -83,6 +71,19 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+-- ---------------------------------------------------------------------
+-- HELPER: caller's app role, bypassing RLS to avoid recursion in users
+-- policies. SECURITY DEFINER + locked search_path (Supabase-safe pattern).
+-- Must be defined after public.users exists (PostgreSQL validates the body).
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION auth_user_role()
+RETURNS user_role
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT role FROM public.users WHERE id = auth.uid();
+$$;
 
 CREATE TABLE IF NOT EXISTS addresses (   -- account-use only; NOT delivery (pickup-only MVP)
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
