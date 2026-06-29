@@ -88,8 +88,8 @@ Mapping helpers live in `_shared/syncMapping.ts` with conservative optional type
 | `items[].price` (cents) | `products.base_price` | ÷ 100, `numeric(10,2)` |
 | `items[].sku` | `products.sku` | |
 | `items[].hidden` | `products.status` | `hidden` vs `in_stock` |
-| `items[].categories[0]` | `products.category_id` | First category only — **TODO:** multi-category |
-| `items[].code` | `product_barcodes.barcode` | **TODO:** confirm UPC vs internal code |
+| `items[].categories[0]` | `products.category_id` | Requires `expand=categories` on GET /items (implemented) |
+| `items[].code` | `product_barcodes.barcode` | UPC/barcode on base item per Clover docs |
 | `items[].alternateCodes[]` | `product_barcodes` | `clover_alternate_code_id` when id present |
 | `item_stocks[].item.id` | match `products.clover_item_id` | Skip if no mirror row |
 | `item_stocks[].quantity` | `inventory.quantity_on_hand` | Prefer over deprecated `stockCount` |

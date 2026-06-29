@@ -16,7 +16,9 @@ export function cloverModifiedAtIso(modifiedTime?: number): string | null {
   if (modifiedTime === undefined || modifiedTime === null || Number.isNaN(modifiedTime)) {
     return null;
   }
-  return new Date(modifiedTime).toISOString();
+  // Clover Platform API uses Unix epoch milliseconds (int64). Values below 1e12 are treated as seconds.
+  const ms = modifiedTime < 1_000_000_000_000 ? modifiedTime * 1000 : modifiedTime;
+  return new Date(ms).toISOString();
 }
 
 /** Clover item prices are integer cents per Platform API docs. */
@@ -25,6 +27,11 @@ export function cloverCentsToPriceString(cents?: number): string {
     return '0.00';
   }
   return (cents / 100).toFixed(2);
+}
+
+function parseSortOrder(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
 
 export function mapCloverCategoryRow(category: CloverCategory): Record<string, unknown> | null {
@@ -37,7 +44,7 @@ export function mapCloverCategoryRow(category: CloverCategory): Record<string, u
     clover_category_id: category.id,
     name: category.name,
     slug: `${baseSlug}-${category.id.slice(-6)}`,
-    sort_order: category.sortOrder ?? 0,
+    sort_order: parseSortOrder(category.sortOrder),
     is_active: true,
     clover_sync_status: 'synced',
     last_synced_at: SYNCED_AT(),
@@ -82,7 +89,8 @@ export interface BarcodeMapping {
 
 /**
  * Extract barcode strings from a Clover item.
- * TODO(Phase 2F.5): validate whether `code` is UPC/EAN vs internal SKU — see docs/CLOVER_SANDBOX_SYNC_TESTING.md §8.
+ * Per Clover docs, `code` is the item UPC/barcode on the base item object (no expand needed).
+ * `alternateCodes` is optional-safe — not listed as a GET /items expand field; keep if present in payload.
  */
 export function extractBarcodeMappings(item: CloverItem): BarcodeMapping[] {
   const rows: BarcodeMapping[] = [];
@@ -122,6 +130,33 @@ export function readStockQuantity(stock: CloverItemStock): number | null {
   return null;
 }
 
+/** Clover-owned category fields — slug omitted on update to keep stable URLs. */
+function categoryMirrorUpdatePatch(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: row.name,
+    sort_order: row.sort_order,
+    clover_sync_status: row.clover_sync_status,
+    last_synced_at: row.last_synced_at,
+    clover_modified_at: row.clover_modified_at,
+  };
+}
+
+/** Clover-owned product fields — preserves app-only columns (is_featured, description, etc.) on re-sync. */
+function productMirrorUpdatePatch(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: row.name,
+    category_id: row.category_id,
+    sku: row.sku,
+    base_price: row.base_price,
+    sale_price: row.sale_price,
+    status: row.status,
+    clover_sync_status: row.clover_sync_status,
+    last_synced_at: row.last_synced_at,
+    clover_modified_at: row.clover_modified_at,
+    updated_at: row.updated_at,
+  };
+}
+
 export async function upsertCategoryMirror(
   admin: SupabaseClient,
   row: Record<string, unknown>,
@@ -134,7 +169,10 @@ export async function upsertCategoryMirror(
     .maybeSingle();
 
   if (existing?.id) {
-    const { error } = await admin.from('categories').update(row).eq('id', existing.id);
+    const { error } = await admin
+      .from('categories')
+      .update(categoryMirrorUpdatePatch(row))
+      .eq('id', existing.id);
     return error ? 'failed' : 'upserted';
   }
 
@@ -154,7 +192,10 @@ export async function upsertProductMirror(
     .maybeSingle();
 
   if (existing?.id) {
-    const { error } = await admin.from('products').update(row).eq('id', existing.id);
+    const { error } = await admin
+      .from('products')
+      .update(productMirrorUpdatePatch(row))
+      .eq('id', existing.id);
     return { outcome: error ? 'failed' : 'upserted', productId: existing.id as string };
   }
 

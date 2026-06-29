@@ -1,0 +1,9 @@
+{
+  "_comment": "Sanitized fixture — Clover GET /v3/merchants/{mId}/item_stocks element. Not a live response.",
+  "item": {
+    "id": "SBX_ITEM_PLANTAIN_001"
+  },
+  "quantity": 25,
+  "stockCount": 25,
+  "modifiedTime": 1719590500000
+}

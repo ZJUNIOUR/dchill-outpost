@@ -252,19 +252,73 @@ Requires `CLOVER_SYNC_CRON_SECRET` set in Edge Function secrets.
 
 ## 8. Mapping risks still unresolved (sandbox validation required)
 
-| Risk | Severity | Action in sandbox |
-|------|----------|-----------------|
-| `GET /items` may need `expand=categories` for category link | High | Inspect raw item JSON; add expand in 2G if categories missing |
-| `GET /items` may need `expand=alternateCodes` for barcodes | Medium | Confirm `code` / `alternateCodes` shape |
-| `item.code` vs UPC vs internal SKU | Medium | Compare scanned barcode to mirrored `product_barcodes` |
-| Multi-category items — only first category mapped | Low | Document or extend mapping later |
-| Price always in cents | Low | Confirm `$2.49` → `2.49` in mirror |
-| `modifiedTime` units (ms vs s) | Medium | Compare `clover_modified_at` to Clover UI |
-| No `conflict` status on concurrent local + Clover edits | Medium | Phase 2G guards |
-| Product update overwrites app-only columns | High | Phase 2G column-level merge |
-| Duplicate `sku` across items breaks insert | Medium | Use unique SKUs in sandbox test data |
+| Risk | Severity | Phase 2F.6 triage |
+|------|----------|-------------------|
+| `GET /items` needs `expand=categories` | High | **Resolved in code** — official Clover expand docs |
+| `GET /items` needs `expand=alternateCodes` | Medium | **Not required** — `code` on base item; `alternateCodes` optional if present |
+| `item.code` vs UPC vs internal SKU | Medium | **Docs:** `code` is UPC/barcode; `sku` is separate field |
+| Multi-category items — only first category mapped | Low | Open — by design for MVP |
+| Price integer cents | Low | **Confirmed** — e.g. `249` → `$2.49` |
+| `modifiedTime` ms vs seconds | Medium | **Handled** — ms default; seconds if value &lt; 1e12 |
+| No `conflict` status on concurrent edits | Medium | Phase 2G |
+| Product update overwrites app-only columns | High | **Mitigated** — update patch limits Clover-owned fields |
+| Duplicate `sku` across items breaks insert | Medium | Open — causes `partial` sync; unique SKUs in sandbox |
 
 Code TODOs referencing these live in `supabase/functions/_shared/cloverClient.ts` and `syncMapping.ts`.
+
+---
+
+## 10. Phase 2F.6 — Sandbox sync run and mapping triage
+
+**Run date:** 2026-06-28  
+**Executor:** Repo agent (no live merchant credentials in workspace)
+
+### 10.1 Live sandbox sync result
+
+| Step | Status | Notes |
+|------|--------|-------|
+| Clover sandbox merchant configured | **NOT VERIFIED** | No `supabase/.env.local` or Edge secrets in this environment |
+| Sandbox test data in Clover | **NOT VERIFIED** | Operator must create per §4 |
+| Edge Function secrets set | **NOT VERIFIED** | Must be set in Supabase Dashboard only |
+| `clover-sync-catalog` executed | **NOT RUN** | Requires deployed functions + `CLOVER_ACCESS_TOKEN` |
+| `clover-sync-inventory` executed | **NOT RUN** | Run after catalog on live project |
+| Supabase mirror tables verified | **NOT RUN** | See §6 queries after live sync |
+
+**Live sync verdict:** **BLOCKED** until an operator runs the manual plan (§7) with sandbox secrets outside the repo.
+
+### 10.2 Documentation-based mapping triage (completed)
+
+| Question | Finding | Code change |
+|----------|---------|-------------|
+| `expand=categories` required? | Yes — [Clover expanding fields](https://docs.clover.com/dev/docs/expanding-fields) | `listCloverItems` now passes `expand=categories` |
+| `expand=alternateCodes` required? | No — not in official expand list for `/items` | No change; optional `alternateCodes` parsing kept |
+| `item.code` = barcode? | Yes — doc example UPC `024463061095` | Maps to `product_barcodes.barcode` |
+| `price` in cents? | Yes — doc example `150` = $1.50 | `cloverCentsToPriceString` unchanged |
+| `modifiedTime` format? | Unix ms (int64) per Platform API | `cloverModifiedAtIso` handles ms + seconds fallback |
+| Stock `quantity` vs `stockCount`? | Prefer `quantity`; `stockCount` deprecated | `readStockQuantity` unchanged |
+| Duplicate SKU partial failure? | Postgres unique on `products.sku` | Documented; no auto-remediation |
+| App-only fields on re-sync? | Risk on full-row update | **Fixed:** `productMirrorUpdatePatch` on update |
+
+Sanitized fixtures (no secrets): `docs/samples/clover-item-sample.sanitized.json`, `docs/samples/clover-stock-sample.sanitized.json`.
+
+### 10.3 Remaining risks before production
+
+1. **Live sandbox run not executed** — mirror row counts unverified.
+2. **Multi-category items** — only first category linked.
+3. **`alternateCodes`** — not confirmed on list endpoint; may need per-item GET in future.
+4. **Conflict detection** — still absent (`clover_sync_status=conflict`).
+5. **Duplicate SKU** — insert fails; operator must keep Clover SKUs unique or handle partial sync.
+
+### 10.4 Phase 2G approval gate
+
+| Gate | Status |
+|------|--------|
+| Read-only sync code + mapping fixes | **READY** |
+| Live sandbox catalog + inventory sync succeeded | **BLOCKED** — operator action required |
+| Mirror spot-check vs Clover UI | **BLOCKED** |
+| Phase 2G write-through implementation | **BLOCKED** until §9 checkboxes pass on live sandbox |
+
+**Recommendation:** Operator completes §7 manual run, checks mirror tables, then approves Phase 2G. Mapping code is safe to merge; write-through must wait for live verification.
 
 ---
 
@@ -285,4 +339,5 @@ Code TODOs referencing these live in `supabase/functions/_shared/cloverClient.ts
 - `supabase/functions/README.md` — function layout and secrets
 - `docs/CLOVER_INVENTORY_MAPPING_PLAN.md` — schema mapping plan
 - `docs/MEMORY.md` §6a — Clover-primary decision
+- `docs/samples/` — sanitized Clover payload fixtures (no secrets)
 - `docs/BUILD_ORDER.md` — Phase 2F → 2G → 3 ordering

@@ -39,13 +39,13 @@ export interface CloverListResponse<T> {
 export interface CloverCategory {
   id?: string;
   name?: string;
-  sortOrder?: number;
+  sortOrder?: number | string;
   modifiedTime?: number;
 }
 
 /**
  * Narrow optional Clover item shape.
- * TODO(Phase 2F.5): confirm `code` vs `alternateCodes` with sandbox payloads — see docs/CLOVER_SANDBOX_SYNC_TESTING.md §8.
+ * `code` = UPC/barcode on base object; `categories` requires expand=categories on list GET.
  */
 export interface CloverItem {
   id?: string;
@@ -154,9 +154,8 @@ export async function listCloverCategories(config: CloverConfig): Promise<Clover
 }
 
 export async function listCloverItems(config: CloverConfig): Promise<CloverItem[]> {
-  // Item catalog only — stock quantities synced separately via listCloverItemStocks.
-  // TODO(Phase 2F.5): sandbox may require expand=categories,alternateCodes on GET /items — see docs/CLOVER_SANDBOX_SYNC_TESTING.md §8.
-  return cloverGetAllPages<CloverItem>(config, '/items');
+  // Categories are not embedded unless expanded — see Clover "Use expandable fields" docs.
+  return cloverGetAllPages<CloverItem>(config, '/items', { expand: 'categories' });
 }
 
 export async function listCloverItemStocks(config: CloverConfig): Promise<CloverItemStock[]> {

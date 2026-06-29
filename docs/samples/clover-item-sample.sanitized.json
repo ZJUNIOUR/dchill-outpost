@@ -1,0 +1,23 @@
+{
+  "_comment": "Sanitized fixture — Clover GET /v3/merchants/{mId}/items with expand=categories. Not a live response.",
+  "id": "SBX_ITEM_PLANTAIN_001",
+  "hidden": false,
+  "name": "Sandbox Plantain",
+  "alternateName": "",
+  "code": "0024463061095",
+  "sku": "SBX-PLANTAIN-001",
+  "price": 249,
+  "priceType": "FIXED",
+  "modifiedTime": 1719590400000,
+  "defaultTaxRates": true,
+  "isRevenue": true,
+  "categories": {
+    "elements": [
+      {
+        "id": "SBX_CAT_PRODUCE_001",
+        "name": "Sandbox Produce",
+        "sortOrder": 0
+      }
+    ]
+  }
+}
